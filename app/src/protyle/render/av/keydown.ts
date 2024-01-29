@@ -23,6 +23,10 @@ export const avKeydown = (event: KeyboardEvent, nodeElement: HTMLElement, protyl
         if (!rowElement) {
             return false;
         }
+        nodeElement.querySelectorAll(".av__cell--active").forEach(item => {
+            item.classList.remove("av__cell--active");
+            item.querySelector(".av__drag-fill")?.remove();
+        });
         if (event.key === "Escape") {
             selectCellElement.classList.remove("av__cell--select");
             selectRow(rowElement.querySelector(".av__firstcol"), "select");
@@ -34,7 +38,7 @@ export const avKeydown = (event: KeyboardEvent, nodeElement: HTMLElement, protyl
             event.preventDefault();
             return true;
         }
-        if (event.key === "Backspace") {
+        if (event.key === "Backspace" || event.key === "Delete") {
             updateCellsValue(protyle, nodeElement, undefined, [selectCellElement]);
             event.preventDefault();
             return true;

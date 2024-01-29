@@ -2,11 +2,12 @@ import {fetchSyncPost} from "../util/fetch";
 import {App} from "../index";
 import {Plugin} from "./index";
 /// #if !MOBILE
-import {resizeTopBar} from "../layout/util";
+import {resizeTopBar, saveLayout} from "../layout/util";
 /// #endif
 import {API} from "./API";
 import {getFrontend, isMobile, isWindow} from "../util/functions";
 import {Constants} from "../constants";
+import {uninstall} from "./uninstall";
 
 const requireFunc = (key: string) => {
     const modules = {
@@ -64,11 +65,6 @@ const loadPluginJS = async (app: App, item: IPluginData) => {
         name: item.name,
         i18n: item.i18n
     });
-    // https://github.com/siyuan-note/siyuan/issues/9943
-    Object.defineProperty(plugin, "name", {
-        value: item.name,
-        writable: false,
-    });
     app.plugins.push(plugin);
     try {
         await plugin.onload();
@@ -85,6 +81,7 @@ export const loadPlugin = async (app: App, item: IPluginData) => {
     styleElement.textContent = item.css;
     document.head.append(styleElement);
     afterLoadPlugin(plugin);
+    saveLayout();
     return plugin;
 };
 
@@ -233,5 +230,19 @@ export const afterLoadPlugin = (plugin: Plugin) => {
             }], dock.config.position === "RightBottom" ? 1 : 0, dock.config.index);
         }
     });
+    /// #endif
+};
+
+export const reloadPlugin = (app: App) => {
+    app.plugins.forEach((item) => {
+        uninstall(this, item.name);
+    });
+    loadPlugins(this).then(() => {
+        app.plugins.forEach(item => {
+            afterLoadPlugin(item);
+        });
+    });
+    /// #if !MOBILE
+    saveLayout();
     /// #endif
 };

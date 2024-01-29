@@ -67,10 +67,10 @@ export const setFilter = async (options: {
     const menu = new Menu("set-filter-" + options.filter.column, () => {
         const oldFilters = JSON.parse(JSON.stringify(options.data.view.filters));
         const selectElement = window.siyuan.menus.menu.element.querySelector(".b3-select") as HTMLSelectElement;
-        if (!selectElement) {
+        const operator = selectElement.value as TAVFilterOperator;
+        if (!selectElement || !operator) {
             return;
         }
-        const operator = selectElement.value as TAVFilterOperator;
         let hasMatch = false;
         let cellValue: IAVCellValue;
         if (textElements.length > 0) {
@@ -101,6 +101,10 @@ export const setFilter = async (options: {
                 }
             });
             cellValue = genCellValue(filterType, mSelect);
+        } else if (filterType === "checkbox") {
+            cellValue = genCellValue(filterType, {
+                checked: operator === "Is true"
+            });
         } else {
             cellValue = genCellValue(filterType, undefined);
         }
@@ -112,6 +116,12 @@ export const setFilter = async (options: {
         let isSame = false;
         options.data.view.filters.find((filter, index) => {
             if (filter.column === options.filter.column) {
+                if (filter.type && filter.type === "checkbox") {
+                    hasMatch = true;
+                    delete filter.type;
+                    options.data.view.filters[index] = newFilter;
+                    return true;
+                }
                 delete filter.type;
                 if (objEquals(filter, newFilter)) {
                     isSame = true;
@@ -187,8 +197,12 @@ export const setFilter = async (options: {
     }
     switch (filterType) {
         case "checkbox":
-            selectHTML = `<option ${"Is true" === options.filter.operator ? "selected" : ""} value="Is true">${window.siyuan.languages.checked}</option>
-<option ${"Is false" === options.filter.operator ? "selected" : ""} value="Is false">${window.siyuan.languages.unchecked}</option>`;
+            selectHTML = `<option ${("Is true" === options.filter.operator && !options.filter.type) ? "selected" : ""} value="Is true">${window.siyuan.languages.checked}</option>
+<option ${("Is false" === options.filter.operator && !options.filter.type) ? "selected" : ""} value="Is false">${window.siyuan.languages.unchecked}</option>`;
+            if (options.filter.type) {
+                // 初始化时有 type 字段
+                selectHTML = `<option selected></option>${selectHTML}`;
+            }
             break;
         case "block":
         case "text":
@@ -256,12 +270,13 @@ export const setFilter = async (options: {
     }
     menu.addItem({
         iconHTML: "",
+        type: "readonly",
         label: `<select style="margin: 4px 0" class="b3-select fn__size200">${selectHTML}</select>`
     });
     if (filterType === "select" || filterType === "mSelect") {
         colData.options?.forEach((option) => {
             let icon = "iconUncheck";
-            options.filter.value?.mSelect.find((optionItem) => {
+            options.filter.value?.mSelect?.find((optionItem) => {
                 if (optionItem.content === option.name) {
                     icon = "iconCheck";
                 }
@@ -294,21 +309,25 @@ export const setFilter = async (options: {
         }
         menu.addItem({
             iconHTML: "",
+            type: "readonly",
             label: `<input style="margin: 4px 0" value="${value}" class="b3-text-field fn__size200">`
         });
     } else if (filterType === "number") {
         menu.addItem({
             iconHTML: "",
+            type: "readonly",
             label: `<input style="margin: 4px 0" value="${options.filter.value?.number.isNotEmpty ? options.filter.value.number.content : ""}" class="b3-text-field fn__size200">`
         });
     } else if (["date", "updated", "created"].includes(filterType)) {
         const dateValue = options.filter.value ? options.filter.value[filterType as "date"] : null;
         menu.addItem({
             iconHTML: "",
+            type: "readonly",
             label: `<input style="margin: 4px 0" value="${(dateValue.isNotEmpty || filterType !== "date") ? dayjs(dateValue.content).format("YYYY-MM-DD") : ""}" type="date" max="9999-12-31" class="b3-text-field fn__size200">`
         });
         menu.addItem({
             iconHTML: "",
+            type: "readonly",
             label: `<input style="margin: 4px 0" value="${dateValue.isNotEmpty2 ? dayjs(dateValue.content2).format("YYYY-MM-DD") : ""}" type="date" max="9999-12-31" class="b3-text-field fn__size200">`
         });
     }
@@ -494,7 +513,7 @@ export const getFiltersHTML = (data: IAVTable) => {
 
     data.filters.forEach((item: IAVFilter) => {
         html += `<button class="b3-menu__item" draggable="true" data-id="${item.column}">
-    <svg class="b3-menu__icon"><use xlink:href="#iconDrag"></use></svg>
+    <svg class="b3-menu__icon fn__grab"><use xlink:href="#iconDrag"></use></svg>
     <div class="fn__flex-1">${genFilterItem(item)}</div>
     <svg class="b3-menu__action" data-type="removeFilter"><use xlink:href="#iconTrashcan"></use></svg>
 </button>`;

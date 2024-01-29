@@ -18,6 +18,7 @@ package model
 
 import (
 	"bytes"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"github.com/88250/pdfcpu/pkg/font"
@@ -54,6 +55,131 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func ExportAv2CSV(avID string) (zipPath string, err error) {
+	// Database block supports export as CSV https://github.com/siyuan-note/siyuan/issues/10072
+
+	attrView, err := av.ParseAttributeView(avID)
+	if nil != err {
+		return
+	}
+
+	view, err := attrView.GetCurrentView()
+	if nil != err {
+		return
+	}
+
+	name := util.FilterFileName(attrView.Name)
+	if "" == name {
+		name = "Untitled"
+	}
+
+	table, err := renderAttributeViewTable(attrView, view)
+	if nil != err {
+		logging.LogErrorf("render attribute view [%s] table failed: %s", avID, err)
+		return
+	}
+
+	exportFolder := filepath.Join(util.TempDir, "export", "csv", name)
+	if err = os.MkdirAll(exportFolder, 0755); nil != err {
+		logging.LogErrorf("mkdir [%s] failed: %s", exportFolder, err)
+		return
+	}
+	csvPath := filepath.Join(exportFolder, name+".csv")
+
+	f, err := os.OpenFile(csvPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if nil != err {
+		logging.LogErrorf("open [%s] failed: %s", csvPath, err)
+		return
+	}
+
+	if _, err = f.WriteString("\xEF\xBB\xBF"); nil != err { // 写入 UTF-8 BOM，避免使用 Microsoft Excel 打开乱码
+		logging.LogErrorf("write UTF-8 BOM to [%s] failed: %s", csvPath, err)
+		f.Close()
+		return
+	}
+
+	writer := csv.NewWriter(f)
+	var header []string
+	for _, col := range table.Columns {
+		header = append(header, col.Name)
+	}
+	if err = writer.Write(header); nil != err {
+		logging.LogErrorf("write csv header [%s] failed: %s", header, err)
+		f.Close()
+		return
+	}
+
+	for _, row := range table.Rows {
+		var rowVal []string
+		for _, cell := range row.Cells {
+			var val string
+			if nil != cell.Value {
+				if av.KeyTypeDate == cell.Value.Type {
+					if nil != cell.Value.Date {
+						cell.Value.Date = av.NewFormattedValueDate(cell.Value.Date.Content, cell.Value.Date.Content2, av.DateFormatNone, cell.Value.Date.IsNotTime)
+					}
+				} else if av.KeyTypeCreated == cell.Value.Type {
+					if nil != cell.Value.Created {
+						cell.Value.Created = av.NewFormattedValueCreated(cell.Value.Created.Content, 0, av.CreatedFormatNone)
+					}
+				} else if av.KeyTypeUpdated == cell.Value.Type {
+					if nil != cell.Value.Updated {
+						cell.Value.Updated = av.NewFormattedValueUpdated(cell.Value.Updated.Content, 0, av.UpdatedFormatNone)
+					}
+				} else if av.KeyTypeMAsset == cell.Value.Type {
+					if nil != cell.Value.MAsset {
+						buf := &bytes.Buffer{}
+						for _, a := range cell.Value.MAsset {
+							buf.WriteString("![](")
+							buf.WriteString(a.Content)
+							buf.WriteString(") ")
+						}
+						val = strings.TrimSpace(buf.String())
+					}
+				}
+
+				val = cell.Value.String()
+			}
+
+			rowVal = append(rowVal, val)
+		}
+		if err = writer.Write(rowVal); nil != err {
+			logging.LogErrorf("write csv row [%s] failed: %s", rowVal, err)
+			f.Close()
+			return
+		}
+	}
+	writer.Flush()
+
+	zipPath = exportFolder + ".db.zip"
+	zip, err := gulu.Zip.Create(zipPath)
+	if nil != err {
+		logging.LogErrorf("create export .db.zip [%s] failed: %s", exportFolder, err)
+		f.Close()
+		return
+	}
+
+	if err = zip.AddDirectory("", exportFolder); nil != err {
+		logging.LogErrorf("create export .db.zip [%s] failed: %s", exportFolder, err)
+		f.Close()
+		return
+	}
+
+	if err = zip.Close(); nil != err {
+		logging.LogErrorf("close export .db.zip failed: %s", err)
+		f.Close()
+		return
+	}
+
+	f.Close()
+	removeErr := os.RemoveAll(exportFolder)
+	if nil != removeErr {
+		logging.LogErrorf("remove export folder [%s] failed: %s", exportFolder, removeErr)
+	}
+	zipPath = "/export/csv/" + url.PathEscape(filepath.Base(zipPath))
+	return
+}
 
 func Export2Liandi(id string) (err error) {
 	tree, err := loadTreeByBlockID(id)
@@ -739,11 +865,13 @@ func prepareExportTree(bt *treenode.BlockTree) (ret *parse.Tree) {
 			}
 		}
 
+		oldRoot := ret.Root
 		ret = parse.Parse("", []byte(""), luteEngine.ParseOptions)
 		first := ret.Root.FirstChild
 		for _, node := range nodes {
 			first.InsertBefore(node)
 		}
+		ret.Root.KramdownIAL = oldRoot.KramdownIAL
 	}
 	ret.Path = bt.Path
 	ret.HPath = bt.HPath
@@ -1907,16 +2035,14 @@ func exportTree(tree *parse.Tree, wysiwyg, expandKaTexMacros, keepFold bool,
 		switch blockRefMode {
 		case 2: // 锚文本块链
 			var blockRefLink *ast.Node
-			blockRefLink = &ast.Node{Type: ast.NodeLink}
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeOpenBracket})
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeLinkText, Tokens: []byte(linkText)})
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeCloseBracket})
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeOpenParen})
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeLinkDest, Tokens: []byte("siyuan://blocks/" + defID)})
-			blockRefLink.AppendChild(&ast.Node{Type: ast.NodeCloseParen})
+			blockRefLink = &ast.Node{Type: ast.NodeTextMark, TextMarkType: "a", TextMarkTextContent: linkText, TextMarkAHref: "siyuan://blocks/" + defID}
+			blockRefLink.KramdownIAL = n.KramdownIAL
 			n.InsertBefore(blockRefLink)
 		case 3: // 仅锚文本
-			n.InsertBefore(&ast.Node{Type: ast.NodeText, Tokens: []byte(linkText)})
+			var blockRefLink *ast.Node
+			blockRefLink = &ast.Node{Type: ast.NodeTextMark, TextMarkType: "text", TextMarkTextContent: linkText}
+			blockRefLink.KramdownIAL = n.KramdownIAL
+			n.InsertBefore(blockRefLink)
 		case 4: // 脚注
 			refFoot := getRefAsFootnotes(defID, &refFootnotes)
 			n.InsertBefore(&ast.Node{Type: ast.NodeText, Tokens: []byte(linkText)})

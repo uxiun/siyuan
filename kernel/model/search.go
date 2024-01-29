@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -279,6 +280,12 @@ func FindReplace(keyword, replacement string, replaceTypes map[string]bool, ids 
 	// method：0：文本，1：查询语法，2：SQL，3：正则表达式
 	if 1 == method || 2 == method {
 		err = errors.New(Conf.Language(132))
+		return
+	}
+
+	if 0 != groupBy {
+		// 按文档分组后不支持替换 Need to be reminded that replacement operations are not supported after grouping by doc https://github.com/siyuan-note/siyuan/issues/10161
+		err = errors.New(Conf.Language(221))
 		return
 	}
 
@@ -629,7 +636,16 @@ func replaceNodeTokens(n *ast.Node, method int, keyword string, replacement stri
 // orderBy: 0：按块类型（默认），1：按创建时间升序，2：按创建时间降序，3：按更新时间升序，4：按更新时间降序，5：按内容顺序（仅在按文档分组时），6：按相关度升序，7：按相关度降序
 // groupBy：0：不分组，1：按文档分组
 func FullTextSearchBlock(query string, boxes, paths []string, types map[string]bool, method, orderBy, groupBy, page, pageSize int) (ret []*Block, matchedBlockCount, matchedRootCount, pageCount int) {
-	query = strings.TrimSpace(query)
+	ret = []*Block{}
+	if "" == query {
+		return
+	}
+
+	trimQuery := strings.TrimSpace(query)
+	if "" != trimQuery {
+		query = trimQuery
+	}
+
 	beforeLen := 36
 	var blocks []*Block
 	orderByClause := buildOrderBy(method, orderBy)
@@ -835,7 +851,7 @@ func buildTypeFilter(types map[string]bool) string {
 }
 
 func searchBySQL(stmt string, beforeLen, page, pageSize int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
-	stmt = gulu.Str.RemoveInvisible(stmt)
+	stmt = filterQueryInvisibleChars(stmt)
 	stmt = strings.TrimSpace(stmt)
 	blocks := sql.SelectBlocksRawStmt(stmt, page, pageSize)
 	ret = fromSQLBlocks(&blocks, "", beforeLen)
@@ -879,7 +895,7 @@ func removeLimitClause(stmt string) string {
 }
 
 func fullTextSearchRefBlock(keyword string, beforeLen int, onlyDoc bool) (ret []*Block) {
-	keyword = gulu.Str.RemoveInvisible(keyword)
+	keyword = filterQueryInvisibleChars(keyword)
 
 	if ast.IsNodeIDPattern(keyword) {
 		ret, _, _ = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+keyword+"'", 36, 1, 32)
@@ -906,6 +922,17 @@ func fullTextSearchRefBlock(keyword string, beforeLen int, onlyDoc bool) (ret []
 	} else {
 		stmt += " IN " + Conf.Search.TypeFilter()
 	}
+
+	if ignoreLines := getRefSearchIgnoreLines(); 0 < len(ignoreLines) {
+		// Support ignore search results https://github.com/siyuan-note/siyuan/issues/10089
+		notLike := bytes.Buffer{}
+		for _, line := range ignoreLines {
+			notLike.WriteString(" AND ")
+			notLike.WriteString(line)
+		}
+		stmt += notLike.String()
+	}
+
 	orderBy := ` order by case
              when name = '${keyword}' then 10
              when alias = '${keyword}' then 20
@@ -921,7 +948,7 @@ func fullTextSearchRefBlock(keyword string, beforeLen int, onlyDoc bool) (ret []
              when memo LIKE '%${keyword}%' then 90
              when content LIKE '%${keyword}%' and type != 'i' and type != 'l' then 100
              else 65535 end ASC, sort ASC, length ASC`
-	orderBy = strings.ReplaceAll(orderBy, "${keyword}", quotedKeyword)
+	orderBy = strings.ReplaceAll(orderBy, "${keyword}", strings.ReplaceAll(keyword, "'", "''"))
 	stmt += orderBy + " LIMIT " + strconv.Itoa(Conf.Search.Limit)
 	blocks := sql.SelectBlocksRawStmtNoParse(stmt, Conf.Search.Limit)
 	ret = fromSQLBlocks(&blocks, "", beforeLen)
@@ -932,7 +959,7 @@ func fullTextSearchRefBlock(keyword string, beforeLen int, onlyDoc bool) (ret []
 }
 
 func fullTextSearchByQuerySyntax(query, boxFilter, pathFilter, typeFilter, orderBy string, beforeLen, page, pageSize int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
-	query = gulu.Str.RemoveInvisible(query)
+	query = filterQueryInvisibleChars(query)
 	if ast.IsNodeIDPattern(query) {
 		ret, matchedBlockCount, matchedRootCount = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+query+"'", beforeLen, page, pageSize)
 		return
@@ -941,7 +968,7 @@ func fullTextSearchByQuerySyntax(query, boxFilter, pathFilter, typeFilter, order
 }
 
 func fullTextSearchByKeyword(query, boxFilter, pathFilter, typeFilter string, orderBy string, beforeLen, page, pageSize int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
-	query = gulu.Str.RemoveInvisible(query)
+	query = filterQueryInvisibleChars(query)
 	if ast.IsNodeIDPattern(query) {
 		ret, matchedBlockCount, matchedRootCount = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+query+"'", beforeLen, page, pageSize)
 		return
@@ -951,7 +978,7 @@ func fullTextSearchByKeyword(query, boxFilter, pathFilter, typeFilter string, or
 }
 
 func fullTextSearchByRegexp(exp, boxFilter, pathFilter, typeFilter, orderBy string, beforeLen, page, pageSize int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
-	exp = gulu.Str.RemoveInvisible(exp)
+	exp = filterQueryInvisibleChars(exp)
 
 	fieldFilter := fieldRegexp(exp)
 	stmt := "SELECT * FROM `blocks` WHERE " + fieldFilter + " AND type IN " + typeFilter
@@ -998,6 +1025,17 @@ func fullTextSearchByFTS(query, boxFilter, pathFilter, typeFilter, orderBy strin
 	stmt := "SELECT " + projections + " FROM " + table + " WHERE (`" + table + "` MATCH '" + columnFilter() + ":(" + query + ")'"
 	stmt += ") AND type IN " + typeFilter
 	stmt += boxFilter + pathFilter
+
+	if ignoreLines := getSearchIgnoreLines(); 0 < len(ignoreLines) {
+		// Support ignore search results https://github.com/siyuan-note/siyuan/issues/10089
+		notLike := bytes.Buffer{}
+		for _, line := range ignoreLines {
+			notLike.WriteString(" AND ")
+			notLike.WriteString(line)
+		}
+		stmt += notLike.String()
+	}
+
 	stmt += " " + orderBy
 	stmt += " LIMIT " + strconv.Itoa(pageSize) + " OFFSET " + strconv.Itoa((page-1)*pageSize)
 	blocks := sql.SelectBlocksRawStmt(stmt, page, pageSize)
@@ -1040,7 +1078,7 @@ func highlightByQuery(query, typeFilter, id string) (ret []string) {
 }
 
 func fullTextSearchCount(query, boxFilter, pathFilter, typeFilter string) (matchedBlockCount, matchedRootCount int) {
-	query = gulu.Str.RemoveInvisible(query)
+	query = filterQueryInvisibleChars(query)
 	if ast.IsNodeIDPattern(query) {
 		ret, _ := sql.QueryNoLimit("SELECT COUNT(id) AS `matches`, COUNT(DISTINCT(root_id)) AS `docs` FROM `blocks` WHERE `id` = '" + query + "'")
 		if 1 > len(ret) {
@@ -1238,6 +1276,10 @@ func columnFilter() string {
 }
 
 func stringQuery(query string) string {
+	if "" == strings.TrimSpace(query) {
+		return "\"" + query + "\""
+	}
+
 	query = strings.ReplaceAll(query, "\"", "\"\"")
 	query = strings.ReplaceAll(query, "'", "''")
 
@@ -1256,12 +1298,15 @@ func stringQuery(query string) string {
 func markReplaceSpan(n *ast.Node, unlinks *[]*ast.Node, keywords []string, markSpanDataType string, luteEngine *lute.Lute) bool {
 	text := n.Content()
 	if ast.NodeText == n.Type {
-		text = util.EscapeHTML(text)
+		escapedText := util.EscapeHTML(text)
 		escapedKeywords := make([]string, len(keywords))
 		for i, keyword := range keywords {
 			escapedKeywords[i] = util.EscapeHTML(keyword)
 		}
-		text = search.EncloseHighlighting(text, escapedKeywords, search.GetMarkSpanStart(markSpanDataType), search.GetMarkSpanEnd(), Conf.Search.CaseSensitive, false)
+		hText := search.EncloseHighlighting(escapedText, escapedKeywords, search.GetMarkSpanStart(markSpanDataType), search.GetMarkSpanEnd(), Conf.Search.CaseSensitive, false)
+		if hText != escapedText {
+			text = hText
+		}
 		n.Tokens = gulu.Str.ToBytes(text)
 		if bytes.Contains(n.Tokens, []byte(search.MarkDataType)) {
 			linkTree := parse.Inline("", n.Tokens, luteEngine.ParseOptions)
@@ -1357,4 +1402,111 @@ func markReplaceSpanWithSplit(text string, keywords []string, replacementStart, 
 	}
 	ret = buf.String()
 	return
+}
+
+var (
+	searchIgnoreLastModified int64
+	searchIgnore             []string
+	searchIgnoreLock         = sync.Mutex{}
+)
+
+func getSearchIgnoreLines() (ret []string) {
+	// Support ignore search results https://github.com/siyuan-note/siyuan/issues/10089
+
+	now := time.Now().UnixMilli()
+	if now-searchIgnoreLastModified < 30*1000 {
+		return searchIgnore
+	}
+
+	searchIgnoreLock.Lock()
+	defer searchIgnoreLock.Unlock()
+
+	searchIgnoreLastModified = now
+
+	searchIgnorePath := filepath.Join(util.DataDir, ".siyuan", "searchignore")
+	err := os.MkdirAll(filepath.Dir(searchIgnorePath), 0755)
+	if nil != err {
+		return
+	}
+	if !gulu.File.IsExist(searchIgnorePath) {
+		if err = gulu.File.WriteFileSafer(searchIgnorePath, nil, 0644); nil != err {
+			logging.LogErrorf("create searchignore [%s] failed: %s", searchIgnorePath, err)
+			return
+		}
+	}
+	data, err := os.ReadFile(searchIgnorePath)
+	if nil != err {
+		logging.LogErrorf("read searchignore [%s] failed: %s", searchIgnorePath, err)
+		return
+	}
+	dataStr := string(data)
+	dataStr = strings.ReplaceAll(dataStr, "\r\n", "\n")
+	ret = strings.Split(dataStr, "\n")
+
+	ret = gulu.Str.RemoveDuplicatedElem(ret)
+	if 0 < len(ret) && "" == ret[0] {
+		ret = ret[1:]
+	}
+	searchIgnore = nil
+	for _, line := range ret {
+		searchIgnore = append(searchIgnore, line)
+	}
+	return
+}
+
+var (
+	refSearchIgnoreLastModified int64
+	refSearchIgnore             []string
+	refSearchIgnoreLock         = sync.Mutex{}
+)
+
+func getRefSearchIgnoreLines() (ret []string) {
+	// Support ignore search results https://github.com/siyuan-note/siyuan/issues/10089
+
+	now := time.Now().UnixMilli()
+	if now-refSearchIgnoreLastModified < 30*1000 {
+		return refSearchIgnore
+	}
+
+	refSearchIgnoreLock.Lock()
+	defer refSearchIgnoreLock.Unlock()
+
+	refSearchIgnoreLastModified = now
+
+	searchIgnorePath := filepath.Join(util.DataDir, ".siyuan", "refsearchignore")
+	err := os.MkdirAll(filepath.Dir(searchIgnorePath), 0755)
+	if nil != err {
+		return
+	}
+	if !gulu.File.IsExist(searchIgnorePath) {
+		if err = gulu.File.WriteFileSafer(searchIgnorePath, nil, 0644); nil != err {
+			logging.LogErrorf("create refsearchignore [%s] failed: %s", searchIgnorePath, err)
+			return
+		}
+	}
+	data, err := os.ReadFile(searchIgnorePath)
+	if nil != err {
+		logging.LogErrorf("read refsearchignore [%s] failed: %s", searchIgnorePath, err)
+		return
+	}
+	dataStr := string(data)
+	dataStr = strings.ReplaceAll(dataStr, "\r\n", "\n")
+	ret = strings.Split(dataStr, "\n")
+
+	ret = gulu.Str.RemoveDuplicatedElem(ret)
+	if 0 < len(ret) && "" == ret[0] {
+		ret = ret[1:]
+	}
+	refSearchIgnore = nil
+	for _, line := range ret {
+		refSearchIgnore = append(refSearchIgnore, line)
+	}
+	return
+}
+
+func filterQueryInvisibleChars(query string) string {
+	query = strings.ReplaceAll(query, "　", "_@full_width_space@_")
+	query = gulu.Str.RemoveInvisible(query)
+	query = strings.ReplaceAll(query, "_@full_width_space@_", "　")
+	return query
 }

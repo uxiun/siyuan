@@ -287,7 +287,10 @@ func NodeStaticContent(node *ast.Node, excludeTypes []string, includeTextMarkATi
 		lastSpace = false
 		return ast.WalkContinue
 	})
-	return strings.TrimSpace(buf.String())
+
+	// 这里不要 trim，否则无法搜索首尾空格
+	// Improve search and replace for spaces https://github.com/siyuan-note/siyuan/issues/10231
+	return buf.String()
 }
 
 func FirstLeafBlock(node *ast.Node) (ret *ast.Node) {
@@ -962,9 +965,11 @@ func renderTemplateCol(ial map[string]string, tplContent string, rowValues []*av
 		ial["updated"] = time.UnixMilli(block.Block.Updated).Format("20060102150405")
 	}
 
-	funcMap := util.BuiltInTemplateFuncs()
 	goTpl := template.New("").Delims(".action{", "}")
-	tpl, tplErr := goTpl.Funcs(funcMap).Parse(tplContent)
+	tplFuncMap := util.BuiltInTemplateFuncs()
+	// 这里存在依赖问题所以不支持 SQLTemplateFuncs(&tplFuncMap)
+	goTpl = goTpl.Funcs(tplFuncMap)
+	tpl, tplErr := goTpl.Funcs(tplFuncMap).Parse(tplContent)
 	if nil != tplErr {
 		logging.LogWarnf("parse template [%s] failed: %s", tplContent, tplErr)
 		return ""

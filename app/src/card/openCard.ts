@@ -17,6 +17,7 @@ import {getDisplayName, movePathTo} from "../util/pathName";
 import {App} from "../index";
 import {resize} from "../protyle/util/resize";
 import {setStorageVal} from "../protyle/util/compatibility";
+import {focusByRange} from "../protyle/util/selection";
 
 const genCardCount = (unreviewedNewCardCount: number, unreviewedOldCardCount: number,) => {
     return `<span class="ft__error">1</span>
@@ -29,12 +30,7 @@ const genCardCount = (unreviewedNewCardCount: number, unreviewedOldCardCount: nu
 export const genCardHTML = (options: {
     id: string,
     cardType: TCardType,
-    cardsData: {
-        cards: ICard[],
-        unreviewedCount: number
-        unreviewedNewCardCount: number
-        unreviewedOldCardCount: number
-    },
+    cardsData: ICardData,
     isTab: boolean
 }) => {
     let iconsHTML: string;
@@ -48,17 +44,15 @@ export const genCardHTML = (options: {
 </div>`;
     /// #else
     iconsHTML = `<div class="block__icons">
-        ${options.isTab ? '<div class="fn__flex-1"></div>' : `<div class="block__icon block__icon--show">
-            <svg><use xlink:href="#iconRiffCard"></use></svg>
-        </div>
-        <span class="fn__space"></span>
-        <span class="fn__flex-center">${window.siyuan.languages.riffCard}</span>`}
-        <span class="fn__space fn__flex-1 resize__move" style="min-height: 100%"></span>
+        ${options.isTab ? '<div class="fn__flex-1"></div>' : `<div class="block__logo">
+            <svg class="block__logoicon"><use xlink:href="#iconRiffCard"></use></svg>${window.siyuan.languages.riffCard}
+        </div>`}
+        <span class="fn__flex-1 resize__move" style="min-height: 100%"></span>
         <div data-type="count" class="ft__on-surface ft__smaller fn__flex-center${options.cardsData.cards.length === 0 ? " fn__none" : " fn__flex"}">${genCardCount(options.cardsData.unreviewedNewCardCount, options.cardsData.unreviewedOldCardCount)}</span></div>
         <div class="fn__space"></div>
-        <div data-id="${options.id || ""}" data-cardtype="${options.cardType}" data-type="filter" class="block__icon block__icon--show">
+        <button data-id="${options.id || ""}" data-cardtype="${options.cardType}" data-type="filter" class="block__icon block__icon--show">
             <svg><use xlink:href="#iconFilter"></use></svg>
-        </div>
+        </button>
         <div class="fn__space"></div>
         <div data-type="fullscreen" class="b3-tooltips b3-tooltips__sw block__icon block__icon--show" aria-label="${window.siyuan.languages.fullscreen}">
             <svg><use xlink:href="#iconFullscreen"></use></svg>
@@ -128,21 +122,19 @@ ${window.siyuan.config.flashcard.list ? "card__block--hideli" : ""}" data-type="
 </div>`;
 };
 
-export const bindCardEvent = (options: {
+export const bindCardEvent = async (options: {
     app: App,
     element: Element,
     title?: string,
-    cardsData: {
-        cards: ICard[],
-        unreviewedCount: number
-        unreviewedNewCardCount: number
-        unreviewedOldCardCount: number
-    }
+    cardsData: ICardData
     cardType: TCardType,
     id?: string,
     dialog?: Dialog,
     index?: number
 }) => {
+    for (let i = 0; i < options.app.plugins.length; i++) {
+        options.cardsData = await options.app.plugins[i].updateCards(options.cardsData);
+    }
     if (window.siyuan.storage[Constants.LOCAL_FLASHCARD].fullscreen) {
         fullscreen(options.element.querySelector(".card__main"),
             options.element.querySelector('[data-type="fullscreen"]'));
@@ -166,15 +158,21 @@ export const bindCardEvent = (options: {
         window.siyuan.mobile.popEditor = editor;
     }
     if (options.cardsData.cards.length > 0) {
-        fetchPost("/api/filetree/getDoc", {
+        fetchPost("/api/block/getDocInfo", {
             id: options.cardsData.cards[index].blockID,
-            mode: 0,
-            size: Constants.SIZE_GET_MAX
         }, (response) => {
-            onGet({
-                data: response,
-                protyle: editor.protyle,
-                action: response.data.rootID === response.data.id ? [Constants.CB_GET_HTML] : [Constants.CB_GET_ALL, Constants.CB_GET_HTML],
+            editor.protyle.wysiwyg.renderCustom(response.data.ial);
+            fetchPost("/api/filetree/getDoc", {
+                id: options.cardsData.cards[index].blockID,
+                mode: 0,
+                size: Constants.SIZE_GET_MAX
+            }, (response) => {
+                onGet({
+                    updateReadonly: true,
+                    data: response,
+                    protyle: editor.protyle,
+                    action: response.data.rootID === response.data.id ? [Constants.CB_GET_HTML] : [Constants.CB_GET_ALL, Constants.CB_GET_HTML],
+                });
             });
         });
     }
@@ -195,9 +193,12 @@ export const bindCardEvent = (options: {
             rootID: filterElement.getAttribute("data-id"),
             deckID: filterElement.getAttribute("data-id"),
             notebook: filterElement.getAttribute("data-id"),
-        }, (treeCards) => {
+        }, async (treeCards) => {
             index = 0;
             options.cardsData = treeCards.data;
+            for (let i = 0; i < options.app.plugins.length; i++) {
+                options.cardsData = await options.app.plugins[i].updateCards(options.cardsData);
+            }
             if (options.cardsData.cards.length > 0) {
                 nextCard({
                     countElement,
@@ -409,9 +410,12 @@ export const bindCardEvent = (options: {
                         deckID: filterElement.getAttribute("data-id"),
                         notebook: filterElement.getAttribute("data-id"),
                         reviewedCards: options.cardsData.cards
-                    }, (result) => {
+                    }, async (result) => {
                         index = 0;
                         options.cardsData = result.data;
+                        for (let i = 0; i < options.app.plugins.length; i++) {
+                            options.cardsData = await options.app.plugins[i].updateCards(options.cardsData);
+                        }
                         if (options.cardsData.cards.length === 0) {
                             if (options.cardsData.unreviewedCount > 0) {
                                 newRound(countElement, editor, actionElements, result.data.unreviewedCount);
@@ -449,12 +453,7 @@ export const openCard = (app: App) => {
     });
 };
 
-export const openCardByData = (app: App, cardsData: {
-    cards: ICard[],
-    unreviewedCount: number
-    unreviewedNewCardCount: number
-    unreviewedOldCardCount: number
-}, cardType: TCardType, id?: string, title?: string) => {
+export const openCardByData = async (app: App, cardsData: ICardData, cardType: TCardType, id?: string, title?: string) => {
     const exit = window.siyuan.dialogs.find(item => {
         if (item.element.getAttribute("data-key") === Constants.DIALOG_OPENCARD) {
             item.destroy();
@@ -463,6 +462,10 @@ export const openCardByData = (app: App, cardsData: {
     });
     if (exit) {
         return;
+    }
+    let lastRange: Range;
+    if (getSelection().rangeCount > 0) {
+        lastRange = getSelection().getRangeAt(0);
     }
     const dialog = new Dialog({
         positionId: Constants.DIALOG_OPENCARD,
@@ -476,11 +479,14 @@ export const openCardByData = (app: App, cardsData: {
                     window.siyuan.mobile.popEditor = null;
                 }
             }
+            if (lastRange) {
+                focusByRange(lastRange);
+            }
         }
     });
     (dialog.element.querySelector(".b3-dialog__scrim") as HTMLElement).style.backgroundColor = "var(--b3-theme-background)";
     (dialog.element.querySelector(".b3-dialog__container") as HTMLElement).style.maxWidth = "1024px";
-    const editor = bindCardEvent({
+    const editor = await bindCardEvent({
         app,
         element: dialog.element,
         cardsData,
@@ -490,7 +496,14 @@ export const openCardByData = (app: App, cardsData: {
         dialog
     });
     dialog.editor = editor;
-    (dialog.element.querySelector('.b3-button[data-type="-1"]') as HTMLButtonElement).focus();
+    /// #if !MOBILE
+    const focusElement = dialog.element.querySelector(".block__icons button.block__icon") as HTMLElement;
+    focusElement.focus();
+    const range = document.createRange();
+    range.selectNodeContents(focusElement);
+    range.collapse();
+    focusByRange(range);
+    /// #endif
 };
 
 const nextCard = (options: {
@@ -524,15 +537,21 @@ const nextCard = (options: {
     } else {
         options.actionElements[0].firstElementChild.removeAttribute("disabled");
     }
-    fetchPost("/api/filetree/getDoc", {
+    fetchPost("/api/block/getDocInfo", {
         id: options.blocks[options.index].blockID,
-        mode: 0,
-        size: Constants.SIZE_GET_MAX
     }, (response) => {
-        onGet({
-            data: response,
-            protyle: options.editor.protyle,
-            action: response.data.rootID === response.data.id ? [Constants.CB_GET_HTML] : [Constants.CB_GET_ALL, Constants.CB_GET_HTML],
+        options.editor.protyle.wysiwyg.renderCustom(response.data.ial);
+        fetchPost("/api/filetree/getDoc", {
+            id: options.blocks[options.index].blockID,
+            mode: 0,
+            size: Constants.SIZE_GET_MAX
+        }, (response) => {
+            onGet({
+                updateReadonly: true,
+                data: response,
+                protyle: options.editor.protyle,
+                action: response.data.rootID === response.data.id ? [Constants.CB_GET_HTML] : [Constants.CB_GET_ALL, Constants.CB_GET_HTML],
+            });
         });
     });
 };

@@ -18,13 +18,16 @@ export const getCellText = (cellElement: HTMLElement | false) => {
         return "";
     }
     let cellText = "";
-    const textElement = cellElement.querySelector(".av__celltext");
-    if (textElement) {
-        if (textElement.querySelector(".av__cellicon")) {
-            cellText = `${textElement.firstChild.textContent} → ${textElement.lastChild.textContent}`;
-        } else {
-            cellText = textElement.textContent;
-        }
+    const textElements = cellElement.querySelectorAll(".b3-chip, .av__celltext--ref, .av__celltext");
+    if (textElements.length > 0) {
+        textElements.forEach(item => {
+            if (item.querySelector(".av__cellicon")) {
+                cellText += `${item.firstChild.textContent} → ${item.lastChild.textContent}, `;
+            } else if (item.getAttribute("data-type") !== "block-more") {
+                cellText += item.textContent + ", ";
+            }
+        });
+        cellText = cellText.substring(0, cellText.length - 2);
     } else {
         cellText = cellElement.textContent;
     }
@@ -43,9 +46,13 @@ export const genCellValueByElement = (colType: TAVCol, cellElement: HTMLElement)
             isNotEmpty: !!value
         };
     } else if (["text", "block", "url", "phone", "email", "template"].includes(colType)) {
+        const textElement = cellElement.querySelector(".av__celltext") as HTMLElement;
         cellValue[colType as "text"] = {
-            content: cellElement.querySelector(".av__celltext").textContent.trim()
+            content: textElement.textContent
         };
+        if (colType === "block" && textElement.dataset.id) {
+            cellValue.block.id = textElement.dataset.id;
+        }
     } else if (colType === "mSelect" || colType === "select") {
         const mSelect: IAVCellSelectValue[] = [];
         cellElement.querySelectorAll(".b3-chip").forEach((item: HTMLElement) => {
@@ -120,19 +127,14 @@ export const genCellValue = (colType: TAVCol, value: string | any) => {
                     checked: true
                 }
             };
-        } else if (colType === "relation") {
-            cellValue = {
-                type: colType,
-                relation: {blockIDs: [], contents: [value]}
-            };
         }
     } else if (typeof value === "undefined" || !value) {
         if (colType === "number") {
             cellValue = {
                 type: colType,
                 number: {
-                    content: 0,
-                    isNotEmpty: true
+                    content: null,
+                    isNotEmpty: false
                 }
             };
         } else if (["text", "block", "url", "phone", "email", "template"].includes(colType)) {
@@ -214,11 +216,22 @@ export const cellScrollIntoView = (blockElement: HTMLElement, cellElement: Eleme
             contentElement.scrollTop = contentElement.scrollTop + cellRect.top - avHeaderRect.bottom;
         }
     } else {
-        const avFooterRect = blockElement.querySelector(".av__row--footer").getBoundingClientRect();
-        if (avFooterRect.top < cellRect.bottom) {
+        const footerElement = blockElement.querySelector(".av__row--footer");
+        if (footerElement.querySelector(".av__calc--ashow")) {
+            const avFooterRect = footerElement.getBoundingClientRect();
+            if (avFooterRect.top < cellRect.bottom) {
+                const contentElement = hasClosestByClassName(blockElement, "protyle-content", true);
+                if (contentElement) {
+                    contentElement.scrollTop = contentElement.scrollTop + cellRect.bottom - avFooterRect.top;
+                }
+            }
+        } else {
             const contentElement = hasClosestByClassName(blockElement, "protyle-content", true);
             if (contentElement) {
-                contentElement.scrollTop = contentElement.scrollTop + cellRect.bottom - avFooterRect.top;
+                const contentBottom = contentElement.getBoundingClientRect().bottom;
+                if (cellRect.bottom > contentBottom) {
+                    contentElement.scrollTop = contentElement.scrollTop + (cellRect.bottom - contentBottom);
+                }
             }
         }
     }
@@ -246,17 +259,18 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
         return;
     }
     const blockElement = hasClosestBlock(cellElements[0]);
-    let cellRect = cellElements[0].getBoundingClientRect();
-    if (blockElement) {
-        /// #if MOBILE
-        const contentElement = hasClosestByClassName(blockElement, "protyle-content", true);
-        if (contentElement) {
-            contentElement.scrollTop = contentElement.scrollTop + cellRect.top - 110;
-        }
-        /// #else
-        cellScrollIntoView(blockElement, cellElements[0], false);
-        /// #endif
+    if (!blockElement) {
+        return;
     }
+    let cellRect = cellElements[0].getBoundingClientRect();
+    /// #if MOBILE
+    const contentElement = hasClosestByClassName(blockElement, "protyle-content", true);
+    if (contentElement) {
+        contentElement.scrollTop = contentElement.scrollTop + cellRect.top - 110;
+    }
+    /// #else
+    cellScrollIntoView(blockElement, cellElements[0], false);
+    /// #endif
     cellRect = cellElements[0].getBoundingClientRect();
     let html = "";
     const style = `style="padding-top: 6.5px;position:absolute;left: ${cellRect.left}px;top: ${cellRect.top}px;width:${Math.max(cellRect.width, 25)}px;height: ${cellRect.height}px"`;
@@ -264,7 +278,7 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
         html = `<textarea ${style} class="b3-text-field">${cellElements[0].firstElementChild.textContent}</textarea>`;
     } else if (type === "number") {
         html = `<input type="number" value="${cellElements[0].firstElementChild.getAttribute("data-content")}" ${style} class="b3-text-field">`;
-    } else if (blockElement) {
+    } else {
         if (["select", "mSelect"].includes(type)) {
             openMenuPanel({protyle, blockElement, type: "select", cellElements});
         } else if (type === "mAsset") {
@@ -273,7 +287,7 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
         } else if (type === "date") {
             openMenuPanel({protyle, blockElement, type: "date", cellElements});
         } else if (type === "checkbox") {
-            updateCellValueByInput(protyle, type, cellElements);
+            updateCellValueByInput(protyle, type, blockElement, cellElements);
         } else if (type === "relation") {
             openMenuPanel({protyle, blockElement, type: "relation", cellElements});
         } else if (type === "rollup") {
@@ -293,7 +307,7 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
     if (inputElement) {
         inputElement.select();
         inputElement.focus();
-        if (blockElement && type === "template") {
+        if (type === "template") {
             fetchPost("/api/av/renderAttributeView", {id: blockElement.dataset.avId}, (response) => {
                 response.data.view.columns.find((item: IAVColumn) => {
                     if (item.id === cellElements[0].dataset.colId) {
@@ -308,8 +322,15 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
             inputElement.addEventListener("input", (event: InputEvent) => {
                 if (Constants.BLOCK_HINT_KEYS.includes(inputElement.value.substring(0, 2))) {
                     protyle.toolbar.range = document.createRange();
+                    if (!blockElement.contains(cellElements[0])) {
+                        const rowElement = hasClosestByClassName(cellElements[0], "av__row") as HTMLElement;
+                        if (cellElements[0]) {
+                            cellElements[0] = blockElement.querySelector(`.av__row[data-id="${rowElement.dataset.id}"] .av__cell[data-col-id="${cellElements[0].dataset.colId}"]`) as HTMLElement;
+                        }
+                    }
                     protyle.toolbar.range.selectNodeContents(cellElements[0].lastChild);
                     focusByRange(protyle.toolbar.range);
+                    cellElements[0].classList.add("av__cell--select");
                     hintRef(inputElement.value.substring(2), protyle, "av");
                     avMaskElement?.remove();
                     event.preventDefault();
@@ -323,7 +344,7 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
             }
             if (event.key === "Escape" || event.key === "Tab" ||
                 (event.key === "Enter" && !event.shiftKey && isNotCtrl(event))) {
-                updateCellValueByInput(protyle, type, cellElements);
+                updateCellValueByInput(protyle, type, blockElement, cellElements);
                 if (event.key === "Tab") {
                     protyle.wysiwyg.element.dispatchEvent(new KeyboardEvent("keydown", {
                         shiftKey: event.shiftKey,
@@ -341,49 +362,22 @@ export const popTextCell = (protyle: IProtyle, cellElements: HTMLElement[], type
     }
     avMaskElement.addEventListener("click", (event) => {
         if ((event.target as HTMLElement).classList.contains("av__mask")) {
-            updateCellValueByInput(protyle, type, cellElements);
+            updateCellValueByInput(protyle, type, blockElement, cellElements);
             avMaskElement?.remove();
         }
     });
 };
 
-const updateCellValueByInput = (protyle: IProtyle, type: TAVCol, cellElements: HTMLElement[]) => {
+const updateCellValueByInput = (protyle: IProtyle, type: TAVCol, blockElement: HTMLElement, cellElements: HTMLElement[]) => {
     const rowElement = hasClosestByClassName(cellElements[0], "av__row");
     if (!rowElement) {
         return;
     }
-    if (!document.contains(cellElements[0]) && cellElements.length === 1) {
-        // 原始 cell 已被更新
-        const avid = rowElement.dataset.avid;
-        if (avid) {
-            // 新增行后弹出的输入框
-            const previousId = rowElement.dataset.previousId;
-            cellElements[0] = protyle.wysiwyg.element.querySelector(previousId ? `[data-av-id="${avid}"] .av__row[data-id="${previousId}"]` : `[data-av-id="${avid}"] .av__row--header`).nextElementSibling.querySelector('[data-detached="true"]');
-        } else {
-            // 修改单元格后立即修改其他单元格
-            let tempElement = protyle.wysiwyg.element.querySelector(`.av__cell[data-id="${cellElements[0].dataset.id}"]`) as HTMLElement;
-            if (!tempElement) {
-                // 修改单元格后修改其他没有内容的单元格（id 会随机）
-                tempElement = protyle.wysiwyg.element.querySelector(`.av__row[data-id="${rowElement.dataset.id}"] .av__cell[data-col-id="${cellElements[0].dataset.colId}"]`) as HTMLElement;
-            }
-            if (!tempElement) {
-                return;
-            }
-            cellElements[0] = tempElement;
-        }
-    }
     if (cellElements.length === 1 && cellElements[0].dataset.detached === "true" && !rowElement.dataset.id) {
         return;
     }
-    const blockElement = hasClosestBlock(cellElements[0]);
-    if (!blockElement) {
-        return;
-    }
     const avMaskElement = document.querySelector(".av__mask");
-    const doOperations: IOperation[] = [];
-    const undoOperations: IOperation[] = [];
     const avID = blockElement.getAttribute("data-av-id");
-    const id = blockElement.getAttribute("data-node-id");
     if (type === "template") {
         const colId = cellElements[0].getAttribute("data-col-id");
         const textElement = avMaskElement.querySelector(".b3-text-field") as HTMLInputElement;
@@ -403,93 +397,15 @@ const updateCellValueByInput = (protyle: IProtyle, type: TAVCol, cellElements: H
             }]);
         }
     } else {
-        cellElements.forEach((item) => {
-            const rowElement = hasClosestByClassName(item, "av__row");
-            if (!rowElement) {
-                return;
-            }
-            const rowID = rowElement.getAttribute("data-id");
-            const cellId = item.getAttribute("data-id");
-            const colId = item.getAttribute("data-col-id");
-            const inputValue: {
-                content?: string | number,
-                isNotEmpty?: boolean,
-                checked?: boolean,
-            } = {};
-            const oldValue: {
-                content?: string | number,
-                isNotEmpty?: boolean,
-                checked?: boolean,
-            } = {};
-            if (type === "number") {
-                oldValue.content = parseFloat(item.textContent.trim());
-                oldValue.isNotEmpty = typeof oldValue.content === "number" && !isNaN(oldValue.content);
-                inputValue.content = parseFloat((avMaskElement.querySelector(".b3-text-field") as HTMLInputElement).value);
-                inputValue.isNotEmpty = typeof inputValue.content === "number" && !isNaN(inputValue.content);
-                if (!inputValue.isNotEmpty) {
-                    // 后端仅支持传入数字，因此在为空的时候需要设置为 0
-                    inputValue.content = 0;
-                }
-            } else if (type === "checkbox") {
-                const useElement = item.querySelector("use");
-                inputValue.checked = useElement.getAttribute("xlink:href") === "#iconUncheck";
-                oldValue.checked = !inputValue.checked;
-                useElement.setAttribute("xlink:href", inputValue.checked ? "#iconCheck" : "#iconUncheck");
-            } else {
-                inputValue.content = (avMaskElement.querySelector(".b3-text-field") as HTMLInputElement).value;
-                oldValue.content = type === "block" ? item.firstElementChild.textContent.trim() : item.textContent.trim();
-            }
-            if (objEquals(inputValue, oldValue)) {
-                return;
-            }
-            doOperations.push({
-                action: "updateAttrViewCell",
-                id: cellId,
-                avID,
-                keyID: colId,
-                rowID,
-                data: {
-                    [type]: inputValue,
-                    isDetached: true,
-                }
-            }, {
-                action: "doUpdateUpdated",
-                id,
-                data: dayjs().format("YYYYMMDDHHmmss"),
-            });
-            undoOperations.push({
-                action: "updateAttrViewCell",
-                id: cellId,
-                avID,
-                keyID: colId,
-                rowID,
-                data: {
-                    [type]: oldValue,
-                    isDetached: true,
-                }
-            }, {
-                action: "doUpdateUpdated",
-                id,
-                data: blockElement.getAttribute("updated"),
-            });
-            if (!hasClosestByClassName(cellElements[0], "custom-attr")) {
-                updateAttrViewCellAnimation(item, {
-                    [type]: inputValue,
-                    isDetached: true,
-                    type
-                });
-            }
-        });
-    }
-    if (doOperations.length > 0) {
-        transaction(protyle, doOperations, undoOperations);
+        updateCellsValue(protyle, blockElement, type === "checkbox" ? {
+            checked: cellElements[0].querySelector("use").getAttribute("xlink:href") === "#iconUncheck"
+        } : (avMaskElement.querySelector(".b3-text-field") as HTMLInputElement).value, cellElements);
     }
     if (!hasClosestByClassName(cellElements[0], "custom-attr")) {
         cellElements[0].classList.add("av__cell--select");
     }
-    if (blockElement &&
-        // 单元格编辑中 ctrl+p 光标定位
-        !document.querySelector(".b3-dialog")) {
+    //  单元格编辑中 ctrl+p 光标定位
+    if (!document.querySelector(".b3-dialog")) {
         focusBlock(blockElement);
     }
     document.querySelectorAll(".av__mask").forEach((item) => {
@@ -519,17 +435,18 @@ export const updateCellsValue = (protyle: IProtyle, nodeElement: HTMLElement, va
     }
 
     cellElements.forEach((item: HTMLElement, elementIndex) => {
-        if (!nodeElement.contains(item)) {
-            item = cellElements[elementIndex] = nodeElement.querySelector(`.av__cell[data-id="${item.dataset.id}"]`) as HTMLElement;
-        }
         const rowElement = hasClosestByClassName(item, "av__row");
         if (!rowElement) {
             return;
         }
+        if (!nodeElement.contains(item)) {
+            item = cellElements[elementIndex] = nodeElement.querySelector(`.av__row[data-id="${rowElement.dataset.id}"] .av__cell[data-col-id="${item.dataset.colId}"]`) as HTMLElement;
+        }
         const type = getTypeByCellElement(item) || item.dataset.type as TAVCol;
-        if (["created", "updated", "template"].includes(type)) {
+        if (["created", "updated", "template", "rollup"].includes(type)) {
             return;
         }
+
         const rowID = rowElement.getAttribute("data-id");
         const cellId = item.getAttribute("data-id");
         const colId = item.getAttribute("data-col-id");
@@ -554,6 +471,14 @@ export const updateCellsValue = (protyle: IProtyle, nodeElement: HTMLElement, va
             }
         }
         const cellValue = genCellValue(type, value);
+        cellValue.id = cellId;
+        if ((cellValue.type === "date" && typeof cellValue.date === "string") ||
+            (cellValue.type === "relation" && typeof cellValue.relation === "string")) {
+            return;
+        }
+        if (objEquals(cellValue, oldValue)) {
+            return;
+        }
         doOperations.push({
             action: "updateAttrViewCell",
             id: cellId,
@@ -592,7 +517,7 @@ export const updateCellsValue = (protyle: IProtyle, nodeElement: HTMLElement, va
     return text;
 };
 
-export const renderCell = (cellValue: IAVCellValue, wrap: boolean) => {
+export const renderCell = (cellValue: IAVCellValue) => {
     let text = "";
     if (["text", "template"].includes(cellValue.type)) {
         text = `<span class="av__celltext">${cellValue ? (cellValue[cellValue.type as "text"].content || "") : ""}</span>`;
@@ -609,11 +534,11 @@ export const renderCell = (cellValue: IAVCellValue, wrap: boolean) => {
             text = `<span class="av__celltext">${cellValue.block.content || ""}</span>
 <span class="b3-chip b3-chip--info b3-chip--small" data-type="block-more">${window.siyuan.languages.more}</span>`;
         } else {
-            text = `<span data-type="block-ref" data-id="${cellValue.block.id}" data-subtype="s" class="av__celltext av__celltext--ref">${cellValue.block.content || ""}</span>
+            text = `<span data-type="block-ref" data-id="${cellValue.block.id}" data-subtype="s" class="av__celltext av__celltext--ref">${cellValue.block.content || "Untitled"}</span>
 <span class="b3-chip b3-chip--info b3-chip--small popover__block" data-id="${cellValue.block.id}" data-type="block-more">${window.siyuan.languages.update}</span>`;
         }
     } else if (cellValue.type === "number") {
-        text = `<span style="float: right;${wrap ? "word-break: break-word;" : ""}" class="av__celltext" data-content="${cellValue?.number.isNotEmpty ? cellValue?.number.content : ""}">${cellValue?.number.formattedContent || cellValue?.number.content || ""}</span>`;
+        text = `<span class="av__celltext" data-content="${cellValue?.number.isNotEmpty ? cellValue?.number.content : ""}">${cellValue?.number.formattedContent || cellValue?.number.content || ""}</span>`;
     } else if (cellValue.type === "mSelect" || cellValue.type === "select") {
         cellValue?.mSelect?.forEach((item) => {
             text += `<span class="b3-chip" style="background-color:var(--b3-font-background${item.color});color:var(--b3-font-color${item.color})">${item.content}</span>`;
@@ -646,17 +571,18 @@ export const renderCell = (cellValue: IAVCellValue, wrap: boolean) => {
     } else if (cellValue.type === "checkbox") {
         text += `<svg class="av__checkbox"><use xlink:href="#icon${cellValue?.checkbox?.checked ? "Check" : "Uncheck"}"></use></svg>`;
     } else if (cellValue.type === "rollup") {
-        cellValue?.rollup?.contents?.forEach((item, index) => {
-            const rollupText = ["select", "mSelect", "mAsset", "checkbox", "relation"].includes(item.type) ? renderCell(item, wrap) : renderRollup(item);
-            if (!rollupText && text) {
-                text = text.substring(0, text.length - 2);
-            } else {
-                text += rollupText + ((index === cellValue.rollup.contents.length - 1 || !rollupText) ? "" : ", ");
+        cellValue?.rollup?.contents?.forEach((item) => {
+            const rollupText = ["select", "mSelect", "mAsset", "checkbox", "relation"].includes(item.type) ? renderCell(item) : renderRollup(item);
+            if (rollupText) {
+                text += rollupText + ", ";
             }
         });
+        if (text && text.endsWith(", ")) {
+            text = text.substring(0, text.length - 2);
+        }
     } else if (cellValue.type === "relation") {
         cellValue?.relation?.contents?.forEach((item, index) => {
-            text += `<span class="av__celltext--ref" style="margin-right: 8px" data-id="${cellValue?.relation?.blockIDs[index]}">${item}</span>`;
+            text += `<span class="av__celltext--ref" style="margin-right: 8px" data-id="${cellValue?.relation?.blockIDs[index]}">${item || "Untitled"}</span>`;
         });
     }
     if (["text", "template", "url", "email", "phone", "number", "date", "created", "updated"].includes(cellValue.type) &&
@@ -683,7 +609,7 @@ const renderRollup = (cellValue: IAVCellValue) => {
         if (cellValue?.isDetached) {
             text = `<span class="av__celltext">${cellValue.block?.content || ""}</span>`;
         } else {
-            text = `<span data-type="block-ref" data-id="${cellValue.block?.id}" data-subtype="s" class="av__celltext av__celltext--ref">${cellValue.block?.content || ""}</span>`;
+            text = `<span data-type="block-ref" data-id="${cellValue.block?.id}" data-subtype="s" class="av__celltext av__celltext--ref">${cellValue.block?.content || "Untitled"}</span>`;
         }
     } else if (cellValue.type === "number") {
         text = cellValue?.number.formattedContent || cellValue?.number.content.toString() || "";
@@ -717,14 +643,99 @@ export const updateHeaderCell = (cellElement: HTMLElement, headerValue: {
     if (typeof headerValue.pin !== "undefined") {
         const textElement = cellElement.querySelector(".av__celltext");
         if (headerValue.pin) {
-            if (!textElement.nextElementSibling) {
-                textElement.insertAdjacentHTML("afterend", '<div class="fn__flex-1"></div><svg class="av__cellheadericon"><use xlink:href="#iconPin"></use></svg>');
+            if (!cellElement.querySelector(".av__cellheadericon--pin")) {
+                textElement.insertAdjacentHTML("afterend", '<svg class="av__cellheadericon av__cellheadericon--pin"><use xlink:href="#iconPin"></use></svg>');
             }
         } else {
-            if (textElement.nextElementSibling) {
-                textElement.nextElementSibling.nextElementSibling.remove();
-                textElement.nextElementSibling.remove();
-            }
+            cellElement.querySelector(".av__cellheadericon--pin")?.remove();
         }
+    }
+};
+
+export const getPositionByCellElement = (cellElement: HTMLElement) => {
+    let rowElement = hasClosestByClassName(cellElement, "av__row");
+    if (!rowElement) {
+        return;
+    }
+    let rowIndex = -1;
+    while (rowElement) {
+        rowElement = rowElement.previousElementSibling as HTMLElement;
+        rowIndex++;
+    }
+    let celIndex = -2;
+    while (cellElement) {
+        cellElement = cellElement.previousElementSibling as HTMLElement;
+        if (cellElement && cellElement.classList.contains("av__colsticky")) {
+            cellElement = cellElement.lastElementChild as HTMLElement;
+        }
+        celIndex++;
+    }
+    return {rowIndex, celIndex};
+};
+
+export const dragFillCellsValue = (protyle: IProtyle, nodeElement: HTMLElement, originData: {
+    [key: string]: IAVCellValue[]
+}, originCellIds: string[]) => {
+    nodeElement.querySelector(".av__drag-fill")?.remove();
+    const newData: { [key: string]: Array<IAVCellValue & { colId?: string, element?: HTMLElement }> } = {};
+    nodeElement.querySelectorAll(".av__cell--active").forEach((item: HTMLElement) => {
+        if (originCellIds.includes(item.dataset.id)) {
+            return;
+        }
+        const rowElement = hasClosestByClassName(item, "av__row");
+        if (!rowElement) {
+            return;
+        }
+        if (!newData[rowElement.dataset.id]) {
+            newData[rowElement.dataset.id] = [];
+        }
+        const value: IAVCellValue & {
+            colId?: string,
+            element?: HTMLElement
+        } = genCellValueByElement(getTypeByCellElement(item), item);
+        value.colId = item.dataset.colId;
+        value.element = item;
+        newData[rowElement.dataset.id].push(value);
+    });
+    const doOperations: IOperation[] = [];
+    const undoOperations: IOperation[] = [];
+    const avID = nodeElement.dataset.avId;
+    const originKeys = Object.keys(originData);
+    Object.keys(newData).forEach((rowID, index) => {
+        newData[rowID].forEach((item, cellIndex) => {
+            if (["rollup", "template", "created", "updated"].includes(item.type)) {
+                return;
+            }
+            const data = originData[originKeys[index % originKeys.length]][cellIndex];
+            data.id = item.id;
+            const keyID = item.colId;
+            if (data.type === "block") {
+                data.isDetached = true;
+                delete data.block.id;
+            }
+            doOperations.push({
+                action: "updateAttrViewCell",
+                id: item.id,
+                avID,
+                keyID,
+                rowID,
+                data
+            });
+            item.element.innerHTML = renderCell(data);
+            delete item.colId;
+            delete item.element;
+            undoOperations.push({
+                action: "updateAttrViewCell",
+                id: item.id,
+                avID,
+                keyID,
+                rowID,
+                data: item
+            });
+        });
+    });
+    focusBlock(nodeElement);
+    if (doOperations.length > 0) {
+        transaction(protyle, doOperations, undoOperations);
     }
 };

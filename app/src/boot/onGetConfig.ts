@@ -1,4 +1,4 @@
-import {exportLayout, JSONToLayout, resetLayout, resizeTopBar} from "../layout/util";
+import {adjustLayout, exportLayout, JSONToLayout, resetLayout, resizeTopBar} from "../layout/util";
 import {resizeTabs} from "../layout/tabUtil";
 import {setStorageVal} from "../protyle/util/compatibility";
 /// #if !BROWSER
@@ -14,7 +14,6 @@ import {fetchPost, fetchSyncPost} from "../util/fetch";
 import {addGA, initAssets, setInlineStyle} from "../util/assets";
 import {renderSnippet} from "../config/util/snippets";
 import {openFile, openFileById} from "../editor/util";
-import {focusByRange} from "../protyle/util/selection";
 import {exitSiYuan} from "../dialog/processSystem";
 import {isWindow} from "../util/functions";
 import {initStatus} from "../layout/status";
@@ -126,6 +125,9 @@ export const onGetConfig = (isStart: boolean, app: App) => {
         window.siyuan.emojis = response.data as IEmoji[];
         try {
             JSONToLayout(app, isStart);
+            setTimeout(() => {
+                adjustLayout();
+            }); // 等待 dock 中 !this.pin 的 setTimeout
             /// #if !BROWSER
             sendGlobalShortcut(app);
             /// #endif
@@ -145,6 +147,7 @@ export const onGetConfig = (isStart: boolean, app: App) => {
     window.addEventListener("resize", () => {
         window.clearTimeout(resizeTimeout);
         resizeTimeout = window.setTimeout(() => {
+            adjustLayout();
             resizeTabs();
             resizeTopBar();
         }, 200);
@@ -197,9 +200,7 @@ export const initWindow = async (app: App) => {
     ipcRenderer.send(Constants.SIYUAN_EVENT, "onEvent");
     ipcRenderer.on(Constants.SIYUAN_EVENT, (event, cmd) => {
         if (cmd === "focus") {
-            if (getSelection().rangeCount > 0) {
-                focusByRange(getSelection().getRangeAt(0));
-            }
+            // 由于 https://github.com/siyuan-note/siyuan/issues/10060 和新版 electron 应用切出再切进会保持光标，故移除 focus
             window.siyuan.altIsPressed = false;
             window.siyuan.ctrlIsPressed = false;
             window.siyuan.shiftIsPressed = false;

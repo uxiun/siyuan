@@ -31,7 +31,8 @@
   }
 
   &__action {
-    padding: 8px 4px;
+    padding: 8px;
+    user-select: none;
 
     .b3-button {
       padding: 8px 0;
@@ -48,7 +49,11 @@
 
     & > div {
       flex: 1;
-      margin: 0 4px;
+      margin-right: 8px;
+
+      &:last-child {
+        margin-right: 0;
+      }
 
       & > span {
         display: flex;
@@ -70,7 +75,7 @@
     }
 
     &--hidemark span[data-type~=mark] {
-      font-size: 0;
+      font-size: 0 !important;
 
       &::before {
         content: " [...] ";
@@ -80,15 +85,16 @@
       }
     }
 
-    &--hideli .li > .list {
+    &--hideli .list[custom-riff-decks] .li > .list,
+    &--hideli .li[custom-riff-decks] > .list {
       display: none;
     }
 
-    &--hidesb .protyle-wysiwyg > .sb > div:nth-of-type(n+2):not(.protyle-attr) {
+    &--hidesb .protyle-wysiwyg > .sb[custom-riff-decks] > div:nth-of-type(n+2):not(.protyle-attr) {
       display: none;
     }
 
-    &--hideh .protyle-wysiwyg > div[data-type="NodeHeading"] ~ div {
+    &--hideh .protyle-wysiwyg > div[data-type="NodeHeading"][custom-riff-decks] ~ div {
       display: none;
     }
   }

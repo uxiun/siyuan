@@ -11,7 +11,7 @@ import {updateSearchResult} from "../mobile/menu/search";
 
 export const filterMenu = (config: ISearchOption, cb: () => void) => {
     const filterDialog = new Dialog({
-        title: window.siyuan.languages.type,
+        title: window.siyuan.languages.searchType,
         content: `<div class="b3-dialog__content">
     <label class="fn__flex b3-label">
         <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconMath"></use></svg>
@@ -138,6 +138,7 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         width: isMobile() ? "92vw" : "520px",
         height: "70vh",
     });
+    filterDialog.element.setAttribute("data-key", Constants.DIALOG_SEARCHTYPE);
     const btnsElement = filterDialog.element.querySelectorAll(".b3-button");
     btnsElement[0].addEventListener("click", () => {
         filterDialog.destroy();
@@ -173,6 +174,7 @@ export const replaceFilterMenu = (config: ISearchOption) => {
         width: isMobile() ? "92vw" : "520px",
         height: "70vh",
     });
+    filterDialog.element.setAttribute("data-key", Constants.DIALOG_REPLACETYPE);
     const btnsElement = filterDialog.element.querySelectorAll(".b3-button");
     btnsElement[0].addEventListener("click", () => {
         filterDialog.destroy();
@@ -265,6 +267,7 @@ export const saveCriterion = (config: ISearchOption,
 </div>`,
         width: isMobile() ? "92vw" : "520px",
     });
+    saveDialog.element.setAttribute("data-key", Constants.DIALOG_SAVECRITERION);
     const btnsElement = saveDialog.element.querySelectorAll(".b3-button");
     saveDialog.bindInput(saveDialog.element.querySelector("input"), () => {
         btnsElement[1].dispatchEvent(new CustomEvent("click"));
@@ -370,7 +373,7 @@ export const moreMenu = async (config: ISearchOption,
     /// #if MOBILE
     window.siyuan.menus.menu.append(new MenuItem({
         iconHTML: "",
-        label: window.siyuan.languages.type,
+        label: window.siyuan.languages.searchType,
         click() {
             filterMenu(config, () => {
                 updateSearchResult(config, element, true);

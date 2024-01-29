@@ -9,7 +9,7 @@ import {getIconByType} from "../../editor/getIcon";
 import {enterBack, iframeMenu, setFold, tableMenu, videoMenu, zoomOut} from "../../menus/protyle";
 import {MenuItem} from "../../menus/Menu";
 import {copySubMenu, openAttr, openWechatNotify} from "../../menus/commonMenuItem";
-import {copyPlainText, isMac, isOnlyMeta, updateHotkeyTip, writeText} from "../util/compatibility";
+import {copyPlainText, isMac, isOnlyMeta, openByMobile, updateHotkeyTip, writeText} from "../util/compatibility";
 import {
     transaction,
     turnsIntoOneTransaction,
@@ -217,6 +217,10 @@ export class Gutter {
                     return;
                 }
                 if (buttonElement.dataset.type === "NodeAttributeViewRow") {
+                    blockElement.querySelectorAll(".av__cell--select, .av__cell--active").forEach((cellElement: HTMLElement) => {
+                        cellElement.classList.remove("av__cell--select", "av__cell--active");
+                        cellElement.querySelector(".av__drag-fill")?.remove();
+                    });
                     const avID = blockElement.getAttribute("data-av-id");
                     const srcIDs = [Lute.NewNodeID()];
                     const previousID = event.altKey ? (rowElement.previousElementSibling.getAttribute("data-id") || "") : buttonElement.dataset.rowId;
@@ -231,7 +235,7 @@ export class Gutter {
                         srcIDs,
                         avID,
                     }]);
-                    insertAttrViewBlockAnimation(blockElement, srcIDs, previousID, avID);
+                    insertAttrViewBlockAnimation(protyle, blockElement, srcIDs, previousID, avID);
                 } else {
                     avContextmenu(protyle, rowElement as HTMLElement, {
                         x: gutterRect.left,
@@ -713,15 +717,11 @@ export class Gutter {
             accelerator: "⌘C",
             click() {
                 if (isNotEditBlock(selectsElement[0])) {
-                    let html = "";
-                    selectsElement.forEach(item => {
-                        html += removeEmbed(item);
-                    });
-                    writeText(protyle.lute.BlockDOM2StdMd(html).trimEnd());
+                    focusBlock(selectsElement[0]);
                 } else {
                     focusByRange(getEditorRange(selectsElement[0]));
-                    document.execCommand("copy");
                 }
+                document.execCommand("copy");
             }
         }, {
             label: window.siyuan.languages.copyPlainText,
@@ -1154,11 +1154,11 @@ export class Gutter {
             accelerator: "⌘C",
             click() {
                 if (isNotEditBlock(nodeElement)) {
-                    writeText(protyle.lute.BlockDOM2StdMd(removeEmbed(nodeElement)).trimEnd());
+                    focusBlock(nodeElement);
                 } else {
                     focusByRange(getEditorRange(nodeElement));
-                    document.execCommand("copy");
                 }
+                document.execCommand("copy");
             }
         }, {
             label: window.siyuan.languages.copyPlainText,
@@ -1355,6 +1355,19 @@ export class Gutter {
                     submenu: tableMenu(protyle, nodeElement, cellElement as HTMLTableCellElement, range) as IMenu[]
                 }).element);
             }
+        } else if (type === "NodeAttributeView" && !protyle.disabled) {
+            window.siyuan.menus.menu.append(new MenuItem({type: "separator"}).element);
+            window.siyuan.menus.menu.append(new MenuItem({
+                icon: "iconDatabase",
+                label: window.siyuan.languages.export + " CSV",
+                click() {
+                    fetchPost("/api/export/exportAttributeView", {
+                        id: nodeElement.getAttribute("data-av-id")
+                    }, response => {
+                        openByMobile(response.data.zip);
+                    });
+                }
+            }).element);
         } else if ((type === "NodeVideo" || type === "NodeAudio") && !protyle.disabled) {
             window.siyuan.menus.menu.append(new MenuItem({type: "separator"}).element);
             window.siyuan.menus.menu.append(new MenuItem({
@@ -1923,7 +1936,7 @@ export class Gutter {
                     const rowElement = hasClosestByClassName(target, "av__row");
                     if (rowElement && !rowElement.classList.contains("av__row--header")) {
                         element = rowElement;
-                        html = `<button data-type="NodeAttributeViewRowMenu" data-node-id="${dataNodeId}" data-row-id="${rowElement.dataset.id}" class="ariaLabel" data-position="right" aria-label="${window.siyuan.languages.rowTip}"><svg><use xlink:href="#iconDrag"></use></svg><span ${protyle.disabled ? "" : 'draggable="true"'}></span></button>`;
+                        html = `<button data-type="NodeAttributeViewRowMenu" data-node-id="${dataNodeId}" data-row-id="${rowElement.dataset.id}" class="ariaLabel" data-position="right" aria-label="${window.siyuan.languages.rowTip}"><svg><use xlink:href="#iconDrag"></use></svg><span ${protyle.disabled ? "" : 'draggable="true" class="fn__grab"'}></span></button>`;
                         if (!protyle.disabled) {
                             html = `<button data-type="NodeAttributeViewRow" data-node-id="${dataNodeId}" data-row-id="${rowElement.dataset.id}" class="ariaLabel" data-position="right" aria-label="${isMac() ? window.siyuan.languages.addBelowAbove : window.siyuan.languages.addBelowAbove.replace("⌥", "Alt+")}"><svg><use xlink:href="#iconAdd"></use></svg></button>${html}`;
                         }
@@ -2038,8 +2051,9 @@ data-type="fold"><svg style="width:10px${fold && fold === "1" ? "" : ";transform
         }
         this.element.style.top = `${Math.max(rect.top, contentTop) + marginHeight}px`;
         let left = rect.left - this.element.clientWidth - space;
-        if (nodeElement.getAttribute("data-type") === "NodeBlockQueryEmbed" && this.element.childElementCount === 1) {
-            // 嵌入块为列表时
+        if ((nodeElement.getAttribute("data-type") === "NodeBlockQueryEmbed" && this.element.childElementCount === 1) ||    // 嵌入块为列表时
+            // 为数据库行
+            element.classList.contains("av__row")) {
             left = nodeElement.getBoundingClientRect().left - this.element.clientWidth - space;
         }
         this.element.style.left = `${left}px`;

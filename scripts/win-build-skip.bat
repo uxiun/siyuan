@@ -3,7 +3,6 @@ echo 'use ".\scripts\win-build.bat" instead of "win-build.bat"'
 
 echo 'Building UI'
 cd app
-pnpm i -D electron-builder
 call pnpm install
 call pnpm run build
 cd ..
@@ -40,3 +39,5 @@ cd ..
 @REM echo 'Building Appx should be disabled if you do not need it. Not configured correctly will lead to build failures'
 @REM cd . > app\build\win-unpacked\resources\ms-store
 @REM electron-windows-store --input-directory app\build\win-unpacked --output-directory app\build\ --package-version 1.0.0.0 --package-name SiYuan --manifest app\appx\AppxManifest.xml --assets app\appx\assets\ --make-pri true
+
+xcopy .\app\build\win-unpacked\SiYuan.exe ..\..\nora\siyuan /i /f

@@ -119,7 +119,7 @@ const renderProvider = (provider: number) => {
     ${window.siyuan.languages.syncThirdPartyProviderWebDAVIntro}
     <div class="fn__hr"></div>
     <em>${window.siyuan.languages.featureBetaStage}</em>
-    <div class="fn__hr"></div>    
+    <div class="fn__hr"></div>
     ${window.siyuan.languages.syncThirdPartyProviderTip}
 </div>
 <div class="b3-label b3-label--inner fn__flex">
@@ -264,9 +264,11 @@ const bindProviderEvent = () => {
                         timeout = 7;
                     }
                 }
-                if (300 < timeout) {
-                    timeout = 300;
-                }
+
+                // if (300 < timeout) {
+                //     timeout = 300;
+                // }
+
                 (providerPanelElement.querySelector("#timeout") as HTMLInputElement).value = timeout.toString();
                 const s3 = {
                     endpoint: (providerPanelElement.querySelector("#endpoint") as HTMLInputElement).value,
@@ -286,9 +288,11 @@ const bindProviderEvent = () => {
                 if (7 > timeout) {
                     timeout = 7;
                 }
-                if (300 < timeout) {
-                    timeout = 300;
-                }
+
+                // if (300 < timeout) {
+                //     timeout = 300;
+                // }
+
                 (providerPanelElement.querySelector("#timeout") as HTMLInputElement).value = timeout.toString();
                 const webdav = {
                     endpoint: (providerPanelElement.querySelector("#endpoint") as HTMLInputElement).value,

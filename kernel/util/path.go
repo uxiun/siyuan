@@ -186,9 +186,10 @@ func NormalizeTimeout(timeout int) int {
 		}
 		return 7
 	}
-	if 300 < timeout {
-		return 300
-	}
+
+	// if 300 < timeout {
+	// 	return 300
+	// }
 	return timeout
 }
 

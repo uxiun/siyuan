@@ -24,6 +24,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/88250/gulu"
@@ -40,8 +41,18 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-// FixIndexJob 自动校验数据库索引 https://github.com/siyuan-note/siyuan/issues/7016
-func FixIndexJob() {
+var (
+	checkIndexPerformed = atomic.Bool{}
+)
+
+// checkIndex 自动校验数据库索引，仅在数据同步执行完成后执行一次。
+func checkIndex() {
+	if checkIndexPerformed.Load() {
+		return
+	}
+
+	logging.LogInfof("start checking index...")
+
 	task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseIndex)
 	sql.WaitForWritingDatabase()
 
@@ -61,6 +72,9 @@ func FixIndexJob() {
 		util.PushStatusBar(Conf.Language(185))
 	})
 	debug.FreeOSMemory()
+	logging.LogInfof("finish checking index")
+
+	checkIndexPerformed.Store(true)
 }
 
 var autoFixLock = sync.Mutex{}
@@ -161,7 +175,7 @@ func resetDuplicateBlocksOnFileSys() {
 
 			if info.IsDir() {
 				if boxPath == path {
-					// 跳过根路径（笔记本文件夹）
+					// 跳过笔记本文件夹
 					return nil
 				}
 
@@ -170,14 +184,6 @@ func resetDuplicateBlocksOnFileSys() {
 				}
 
 				if !ast.IsNodeIDPattern(info.Name()) {
-					return nil
-				}
-
-				if util.IsEmptyDir(filepath.Join(path)) {
-					// 删除空的子文档文件夹
-					if removeErr := os.RemoveAll(path); nil != removeErr {
-						logging.LogErrorf("remove empty folder failed: %s", removeErr)
-					}
 					return nil
 				}
 				return nil
@@ -283,7 +289,7 @@ func recreateTree(tree *parse.Tree, absPath string) {
 		}
 	}
 
-	if err := os.RemoveAll(absPath); nil != err {
+	if err := filelock.Remove(absPath); nil != err {
 		logging.LogWarnf("remove [%s] failed: %s", absPath, err)
 		return
 	}
@@ -411,7 +417,7 @@ func reindexTreeByUpdated(rootUpdatedMap, dbRootUpdatedMap map[string]string) {
 	}
 
 	var rootIDs []string
-	for rootID, _ := range dbRootUpdatedMap {
+	for rootID := range dbRootUpdatedMap {
 		if _, ok := rootUpdatedMap[rootID]; !ok {
 			rootIDs = append(rootIDs, rootID)
 		}
@@ -478,7 +484,7 @@ func reindexTree0(tree *parse.Tree, i, size int) {
 		indexWriteJSONQueue(tree)
 	} else {
 		treenode.IndexBlockTree(tree)
-		sql.IndexTreeQueue(tree.Box, tree.Path)
+		sql.IndexTreeQueue(tree)
 	}
 
 	if 0 == i%64 {

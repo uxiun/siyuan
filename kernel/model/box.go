@@ -120,7 +120,7 @@ func ListNotebooks() (ret []*Box, err error) {
 			}
 			if readErr = gulu.JSON.UnmarshalJSON(data, boxConf); nil != readErr {
 				logging.LogErrorf("parse box conf [%s] failed: %s", boxConfPath, readErr)
-				os.RemoveAll(boxConfPath)
+				filelock.Remove(boxConfPath)
 				continue
 			}
 		}
@@ -393,7 +393,9 @@ func moveTree(tree *parse.Tree) {
 		tree.Root.RemoveIALAttr("custom-hidden")
 		filesys.WriteTree(tree)
 	}
-	sql.UpsertTreeQueue(tree)
+
+	sql.RemoveTreeQueue(tree.ID)
+	sql.IndexTreeQueue(tree)
 
 	box := Conf.Box(tree.Box)
 	box.renameSubTrees(tree)
@@ -513,6 +515,7 @@ func fullReindex() {
 	}
 	treenode.InitBlockTree(true)
 
+	sql.IndexIgnoreCached = false
 	openedBoxes := Conf.GetOpenedBoxes()
 	for _, openedBox := range openedBoxes {
 		index(openedBox.ID)

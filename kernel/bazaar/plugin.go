@@ -27,6 +27,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	ants "github.com/panjf2000/ants/v2"
+	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -81,7 +82,7 @@ func Plugins(frontend string) (plugins []*Plugin) {
 		plugin.IconURL = util.BazaarOSSServer + "/package/" + repoURL + "/icon.png"
 		plugin.Funding = repo.Package.Funding
 		plugin.PreferredFunding = getPreferredFunding(plugin.Funding)
-		plugin.PreferredName = getPreferredName(plugin.Package)
+		plugin.PreferredName = GetPreferredName(plugin.Package)
 		plugin.PreferredDesc = getPreferredDesc(plugin.Description)
 		plugin.Updated = repo.Updated
 		plugin.Stars = repo.Stars
@@ -135,7 +136,7 @@ func ParseInstalledPlugin(name, frontend string) (found bool, displayName string
 		}
 
 		found = true
-		displayName = getPreferredName(plugin.Package)
+		displayName = GetPreferredName(plugin.Package)
 		incompatible = isIncompatiblePlugin(plugin, frontend)
 	}
 	return
@@ -178,7 +179,7 @@ func InstalledPlugins(frontend string, checkUpdate bool) (ret []*Plugin) {
 		plugin.PreviewURLThumb = "/plugins/" + dirName + "/preview.png"
 		plugin.IconURL = "/plugins/" + dirName + "/icon.png"
 		plugin.PreferredFunding = getPreferredFunding(plugin.Funding)
-		plugin.PreferredName = getPreferredName(plugin.Package)
+		plugin.PreferredName = GetPreferredName(plugin.Package)
 		plugin.PreferredDesc = getPreferredDesc(plugin.Description)
 		info, statErr := os.Stat(filepath.Join(installPath, "README.md"))
 		if nil != statErr {
@@ -214,7 +215,7 @@ func InstallPlugin(repoURL, repoHash, installPath string, systemID string) error
 }
 
 func UninstallPlugin(installPath string) error {
-	if err := os.RemoveAll(installPath); nil != err {
+	if err := filelock.Remove(installPath); nil != err {
 		logging.LogErrorf("remove plugin [%s] failed: %s", installPath, err)
 		return errors.New("remove community plugin failed")
 	}

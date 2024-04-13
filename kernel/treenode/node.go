@@ -182,7 +182,8 @@ func NodeStaticContent(node *ast.Node, excludeTypes []string, includeTextMarkATi
 			return getAttributeViewContent(node.AttributeViewID)
 		}
 
-		return getAttributeViewName(node.AttributeViewID)
+		ret, _ := av.GetAttributeViewName(node.AttributeViewID)
+		return ret
 	}
 
 	buf := bytes.Buffer{}
@@ -283,6 +284,9 @@ func NodeStaticContent(node *ast.Node, excludeTypes []string, includeTextMarkATi
 			buf.WriteByte(lex.ItemBackslash)
 		case ast.NodeBackslashContent:
 			buf.Write(n.Tokens)
+		case ast.NodeAudio, ast.NodeVideo:
+			buf.WriteString(GetNodeSrcTokens(n))
+			buf.WriteByte(' ')
 		}
 		lastSpace = false
 		return ast.WalkContinue
@@ -291,6 +295,34 @@ func NodeStaticContent(node *ast.Node, excludeTypes []string, includeTextMarkATi
 	// 这里不要 trim，否则无法搜索首尾空格
 	// Improve search and replace for spaces https://github.com/siyuan-note/siyuan/issues/10231
 	return buf.String()
+}
+
+func GetNodeSrcTokens(n *ast.Node) (ret string) {
+	if index := bytes.Index(n.Tokens, []byte("src=\"")); 0 < index {
+		src := n.Tokens[index+len("src=\""):]
+		if index = bytes.Index(src, []byte("\"")); 0 < index {
+			src = src[:bytes.Index(src, []byte("\""))]
+			if !IsRelativePath(src) {
+				return
+			}
+
+			ret = strings.TrimSpace(string(src))
+			return
+		}
+
+		logging.LogWarnf("src is missing the closing double quote in tree [%s] ", n.Box+n.Path)
+	}
+	return
+}
+
+func IsRelativePath(dest []byte) bool {
+	if 1 > len(dest) {
+		return false
+	}
+	if '/' == dest[0] {
+		return false
+	}
+	return !bytes.Contains(dest, []byte(":"))
 }
 
 func FirstLeafBlock(node *ast.Node) (ret *ast.Node) {
@@ -514,49 +546,6 @@ func IsChartCodeBlockCode(code *ast.Node) bool {
 	return render.NoHighlight(language)
 }
 
-func GetAttributeViewName(avID string) (name string) {
-	if "" == avID {
-		return
-	}
-
-	attrView, err := av.ParseAttributeView(avID)
-	if nil != err {
-		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
-		return
-	}
-
-	buf := bytes.Buffer{}
-	for _, v := range attrView.Views {
-		buf.WriteString(v.Name)
-		buf.WriteByte(' ')
-	}
-
-	name = strings.TrimSpace(buf.String())
-	return
-}
-
-func getAttributeViewName(avID string) (name string) {
-	if "" == avID {
-		return
-	}
-
-	attrView, err := av.ParseAttributeView(avID)
-	if nil != err {
-		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
-		return
-	}
-
-	buf := bytes.Buffer{}
-	buf.WriteString(attrView.Name)
-	buf.WriteByte(' ')
-	for _, v := range attrView.Views {
-		buf.WriteString(v.Name)
-		buf.WriteByte(' ')
-	}
-	name = strings.TrimSpace(buf.String())
-	return
-}
-
 func getAttributeViewContent(avID string) (content string) {
 	if "" == avID {
 		return
@@ -620,11 +609,12 @@ func getAttributeViewContent(avID string) (content string) {
 
 func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *av.Table, err error) {
 	ret = &av.Table{
-		ID:      view.ID,
-		Icon:    view.Icon,
-		Name:    view.Name,
-		Columns: []*av.TableColumn{},
-		Rows:    []*av.TableRow{},
+		ID:               view.ID,
+		Icon:             view.Icon,
+		Name:             view.Name,
+		HideAttrViewName: view.HideAttrViewName,
+		Columns:          []*av.TableColumn{},
+		Rows:             []*av.TableRow{},
 	}
 
 	// 组装列
@@ -644,6 +634,7 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 			Template:     key.Template,
 			Relation:     key.Relation,
 			Rollup:       key.Rollup,
+			Date:         key.Date,
 			Wrap:         col.Wrap,
 			Hidden:       col.Hidden,
 			Width:        col.Width,
@@ -740,22 +731,10 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 		ret.Rows = append(ret.Rows, &tableRow)
 	}
 
-	// 渲染自动生成的列值，比如模板列、关联列、汇总列、创建时间列和更新时间列
+	// 渲染自动生成的列值，比如关联列、汇总列、创建时间列和更新时间列
 	for _, row := range ret.Rows {
 		for _, cell := range row.Cells {
 			switch cell.ValueType {
-			case av.KeyTypeTemplate: // 渲染模板列
-				keyValues := rows[row.ID]
-				ial := map[string]string{}
-				block := row.GetBlockValue()
-				if nil != block && !block.IsDetached {
-					ial = cache.GetBlockIAL(row.ID)
-					if nil == ial {
-						ial = map[string]string{}
-					}
-				}
-				content := renderTemplateCol(ial, cell.Value.Template.Content, keyValues)
-				cell.Value.Template.Content = content
 			case av.KeyTypeRollup: // 渲染汇总列
 				rollupKey, _ := attrView.GetKey(cell.Value.KeyID)
 				if nil == rollupKey || nil == rollupKey.Rollup {
@@ -785,7 +764,12 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 				for _, blockID := range relVal.Relation.BlockIDs {
 					destVal := destAv.GetValue(rollupKey.Rollup.KeyID, blockID)
 					if nil == destVal {
-						destVal = GetAttributeViewDefaultValue(ast.NewNodeID(), rollupKey.Rollup.KeyID, blockID, destKey.Type)
+						if destAv.ExistBlock(blockID) { // 数据库中存在行但是列值不存在是数据未初始化，这里补一个默认值
+							destVal = GetAttributeViewDefaultValue(ast.NewNodeID(), rollupKey.Rollup.KeyID, blockID, destKey.Type)
+						}
+						if nil == destVal {
+							continue
+						}
 					}
 					if av.KeyTypeNumber == destKey.Type {
 						destVal.Number.Format = destKey.NumberFormat
@@ -796,14 +780,20 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 				}
 
 				cell.Value.Rollup.RenderContents(rollupKey.Rollup.Calc, destKey)
+
+				// 将汇总列的值保存到 rows 中，后续渲染模板列的时候会用到，下同
+				// Database table view template columns support reading relation, rollup, created and updated columns https://github.com/siyuan-note/siyuan/issues/10442
+				keyValues := rows[row.ID]
+				keyValues = append(keyValues, &av.KeyValues{Key: rollupKey, Values: []*av.Value{{ID: cell.Value.ID, KeyID: rollupKey.ID, BlockID: row.ID, Type: av.KeyTypeRollup, Rollup: cell.Value.Rollup}}})
+				rows[row.ID] = keyValues
 			case av.KeyTypeRelation: // 渲染关联列
 				relKey, _ := attrView.GetKey(cell.Value.KeyID)
 				if nil != relKey && nil != relKey.Relation {
 					destAv, _ := av.ParseAttributeView(relKey.Relation.AvID)
 					if nil != destAv {
-						blocks := map[string]string{}
+						blocks := map[string]*av.Value{}
 						for _, blockValue := range destAv.GetBlockKeyValues().Values {
-							blocks[blockValue.BlockID] = blockValue.Block.Content
+							blocks[blockValue.BlockID] = blockValue
 						}
 						for _, blockID := range cell.Value.Relation.BlockIDs {
 							cell.Value.Relation.Contents = append(cell.Value.Relation.Contents, blocks[blockID])
@@ -819,6 +809,11 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 				} else {
 					cell.Value.Created = av.NewFormattedValueCreated(time.Now().UnixMilli(), 0, av.CreatedFormatNone)
 				}
+
+				keyValues := rows[row.ID]
+				createdKey, _ := attrView.GetKey(cell.Value.KeyID)
+				keyValues = append(keyValues, &av.KeyValues{Key: createdKey, Values: []*av.Value{{ID: cell.Value.ID, KeyID: createdKey.ID, BlockID: row.ID, Type: av.KeyTypeCreated, Created: cell.Value.Created}}})
+				rows[row.ID] = keyValues
 			case av.KeyTypeUpdated: // 渲染更新时间
 				ial := map[string]string{}
 				block := row.GetBlockValue()
@@ -841,6 +836,32 @@ func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *a
 						cell.Value.Updated = av.NewFormattedValueUpdated(time.Now().UnixMilli(), 0, av.UpdatedFormatNone)
 					}
 				}
+
+				keyValues := rows[row.ID]
+				updatedKey, _ := attrView.GetKey(cell.Value.KeyID)
+				keyValues = append(keyValues, &av.KeyValues{Key: updatedKey, Values: []*av.Value{{ID: cell.Value.ID, KeyID: updatedKey.ID, BlockID: row.ID, Type: av.KeyTypeUpdated, Updated: cell.Value.Updated}}})
+				rows[row.ID] = keyValues
+			}
+		}
+	}
+
+	// 最后单独渲染模板列，这样模板列就可以使用汇总、关联、创建时间和更新时间列的值了
+	// Database table view template columns support reading relation, rollup, created and updated columns https://github.com/siyuan-note/siyuan/issues/10442
+	for _, row := range ret.Rows {
+		for _, cell := range row.Cells {
+			switch cell.ValueType {
+			case av.KeyTypeTemplate: // 渲染模板列
+				keyValues := rows[row.ID]
+				ial := map[string]string{}
+				block := row.GetBlockValue()
+				if nil != block && !block.IsDetached {
+					ial = cache.GetBlockIAL(row.ID)
+					if nil == ial {
+						ial = map[string]string{}
+					}
+				}
+				content := renderTemplateCol(ial, keyValues, cell.Value.Template.Content)
+				cell.Value.Template.Content = content
 			}
 		}
 	}
@@ -919,7 +940,23 @@ func FillAttributeViewTableCellNilValue(tableCell *av.TableCell, rowID, colID st
 }
 
 func GetAttributeViewDefaultValue(valueID, keyID, blockID string, typ av.KeyType) (ret *av.Value) {
+	if "" == valueID {
+		valueID = ast.NewNodeID()
+	}
+
 	ret = &av.Value{ID: valueID, KeyID: keyID, BlockID: blockID, Type: typ}
+
+	createdStr := valueID[:len("20060102150405")]
+	created, parseErr := time.ParseInLocation("20060102150405", createdStr, time.Local)
+	if nil == parseErr {
+		ret.CreatedAt = created.UnixMilli()
+	} else {
+		ret.CreatedAt = time.Now().UnixMilli()
+	}
+	if 0 == ret.UpdatedAt {
+		ret.UpdatedAt = ret.CreatedAt
+	}
+
 	switch typ {
 	case av.KeyTypeText:
 		ret.Text = &av.ValueText{}
@@ -955,7 +992,7 @@ func GetAttributeViewDefaultValue(valueID, keyID, blockID string, typ av.KeyType
 	return
 }
 
-func renderTemplateCol(ial map[string]string, tplContent string, rowValues []*av.KeyValues) string {
+func renderTemplateCol(ial map[string]string, rowValues []*av.KeyValues, tplContent string) string {
 	if "" == ial["id"] {
 		block := getRowBlockValue(rowValues)
 		ial["id"] = block.Block.ID
@@ -1000,18 +1037,29 @@ func renderTemplateCol(ial map[string]string, tplContent string, rowValues []*av
 			dataModel["updated"] = time.Now()
 		}
 	}
+
 	for _, rowValue := range rowValues {
 		if 0 < len(rowValue.Values) {
 			v := rowValue.Values[0]
 			if av.KeyTypeNumber == v.Type {
-				dataModel[rowValue.Key.Name] = v.Number.Content
+				if nil != v.Number && v.Number.IsNotEmpty {
+					dataModel[rowValue.Key.Name] = v.Number.Content
+				}
 			} else if av.KeyTypeDate == v.Type {
-				dataModel[rowValue.Key.Name] = time.UnixMilli(v.Date.Content)
+				if nil != v.Date && v.Date.IsNotEmpty {
+					dataModel[rowValue.Key.Name] = time.UnixMilli(v.Date.Content)
+				}
+			} else if av.KeyTypeRollup == v.Type {
+				if 0 < len(v.Rollup.Contents) && av.KeyTypeNumber == v.Rollup.Contents[0].Type {
+					// 汇总数字时仅取第一个数字填充模板
+					dataModel[rowValue.Key.Name] = v.Rollup.Contents[0].Number.Content
+				}
 			} else {
 				dataModel[rowValue.Key.Name] = v.String()
 			}
 		}
 	}
+
 	if err := tpl.Execute(buf, dataModel); nil != err {
 		logging.LogWarnf("execute template [%s] failed: %s", tplContent, err)
 	}

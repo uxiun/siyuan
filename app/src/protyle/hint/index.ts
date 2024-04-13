@@ -210,9 +210,8 @@ ${unicode2Emoji(emoji.unicode)}</button>`;
     }
 
     public bindUploadEvent(protyle: IProtyle, element: HTMLElement) {
-        const uploadElement = element.querySelector('input[type="file"]');
-        if (uploadElement) {
-            uploadElement.addEventListener("change", (event: InputEvent & { target: HTMLInputElement }) => {
+        element.querySelectorAll('input[type="file"]').forEach(item => {
+            item.addEventListener("change", (event: InputEvent & { target: HTMLInputElement }) => {
                 if (event.target.files.length === 0) {
                     return;
                 }
@@ -224,7 +223,7 @@ ${unicode2Emoji(emoji.unicode)}</button>`;
                 uploadFiles(protyle, event.target.files, event.target);
                 hideElements(["hint", "toolbar"], protyle);
             });
-        }
+        });
     }
 
     private getHTMLByData(data: IHintData[]) {
@@ -306,22 +305,22 @@ ${unicode2Emoji(emoji.unicode)}</button>`;
                     return;
                 }
                 event.stopPropagation();
-                this.genSearchHTML(protyle, searchElement, nodeElement, oldValue);
+                this.genSearchHTML(protyle, searchElement, nodeElement, oldValue, source);
             });
             searchElement.addEventListener("compositionend", (event: InputEvent) => {
                 event.stopPropagation();
-                this.genSearchHTML(protyle, searchElement, nodeElement, oldValue);
+                this.genSearchHTML(protyle, searchElement, nodeElement, oldValue, source);
             });
         }
     }
 
-    private genSearchHTML(protyle: IProtyle, searchElement: HTMLInputElement, nodeElement: false | HTMLElement, oldValue: string) {
+    private genSearchHTML(protyle: IProtyle, searchElement: HTMLInputElement, nodeElement: false | HTMLElement, oldValue: string, source: THintSource) {
         this.element.lastElementChild.innerHTML = '<div class="ft__center"><img style="height:32px;width:32px;" src="/stage/loading-pure.svg"></div>';
         fetchPost("/api/search/searchRefBlock", {
             k: searchElement.value,
             id: nodeElement ? nodeElement.getAttribute("data-node-id") : protyle.block.parentID,
             beforeLen: Math.floor((Math.max(protyle.element.clientWidth / 2, 320) - 58) / 28.8),
-            rootID: protyle.block.rootID,
+            rootID: source === "av" ? "" : protyle.block.rootID,
         }, (response) => {
             let searchHTML = "";
             if (response.data.newDoc) {
@@ -357,7 +356,7 @@ ${genHintItemHTML(item)}
             }
             lazyLoadEmojiImg(panelElement);
         } else {
-            this.element.innerHTML = `<div style="padding: 0;${value ? "" : "height:402px"}" class="emojis">
+            this.element.innerHTML = `<div style="padding: 0;max-height:402px" class="emojis">
 <div class="emojis__panel">${filterEmoji(value, 256)}</div>
 <div class="fn__flex${value ? " fn__none" : ""}">
     <button data-type="0" class="emojis__type ariaLabel" aria-label="${window.siyuan.languages.recentEmoji}">${unicode2Emoji("2b50")}</button>
@@ -620,7 +619,7 @@ ${genHintItemHTML(item)}
                 fetchPost("/api/filetree/createDoc", {
                     notebook: protyle.notebookId,
                     path: pathPosix().join(getDisplayName(protyle.path, false, true), newSubDocId + ".sy"),
-                    title: "Untitled",
+                    title: window.siyuan.languages.untitled,
                     md: ""
                 }, () => {
                     insertHTML(`<span data-type="block-ref" data-id="${newSubDocId}" data-subtype="d">Untitled</span>`, protyle);
@@ -681,7 +680,7 @@ ${genHintItemHTML(item)}
                 }
                 let textContent = value;
                 if (value === "```") {
-                    textContent = value + window.siyuan.storage[Constants.LOCAL_CODELANG] + Lute.Caret + "\n```";
+                    textContent = value + (Constants.SIYUAN_RENDER_CODE_LANGUAGES.includes(window.siyuan.storage[Constants.LOCAL_CODELANG]) ? "" : window.siyuan.storage[Constants.LOCAL_CODELANG]) + Lute.Caret + "\n```";
                 }
                 const editableElement = getContenteditableElement(nodeElement);
                 if (value === "![]()") { // https://github.com/siyuan-note/siyuan/issues/4586 1
@@ -764,7 +763,7 @@ ${genHintItemHTML(item)}
                         action: "update"
                     }]);
                 }
-                if (value === "<div>" || value === "$$" || (value.indexOf("```") > -1 && value.length > 3)) {
+                if (value === "<div>" || value === "$$" || (value.indexOf("```") > -1 && (value.length > 3 || nodeElement.classList.contains("render-node")))) {
                     protyle.toolbar.showRender(protyle, nodeElement);
                     processRender(nodeElement);
                 } else if (value.startsWith("```")) {
@@ -784,7 +783,9 @@ ${genHintItemHTML(item)}
                 } else if (value === "---") {
                     focusBlock(nodeElement);
                 } else if (nodeElement.classList.contains("av")) {
-                    avRender(nodeElement, protyle);
+                    avRender(nodeElement, protyle, () => {
+                        focusBlock(nodeElement);
+                    });
                 } else {
                     focusByWbr(nodeElement, range);
                 }
@@ -835,12 +836,12 @@ ${genHintItemHTML(item)}
             return true;
         }
         if (isEmojiPanel) {
-            const currentElement = this.element.querySelector(".emojis__item--current");
+            const currentElement: HTMLElement = this.element.querySelector(".emojis__item--current");
             if (!currentElement) {
                 return false;
             }
             let newCurrentElement: HTMLElement;
-            if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            if (event.key === "ArrowLeft") {
                 if (currentElement.previousElementSibling) {
                     currentElement.classList.remove("emojis__item--current");
                     newCurrentElement = currentElement.previousElementSibling as HTMLElement;
@@ -848,7 +849,7 @@ ${genHintItemHTML(item)}
                     currentElement.classList.remove("emojis__item--current");
                     newCurrentElement = currentElement.parentElement.previousElementSibling.previousElementSibling.lastElementChild as HTMLElement;
                 }
-            } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            } else if (event.key === "ArrowRight") {
                 if (currentElement.nextElementSibling) {
                     currentElement.classList.remove("emojis__item--current");
                     newCurrentElement = currentElement.nextElementSibling as HTMLElement;
@@ -856,15 +857,53 @@ ${genHintItemHTML(item)}
                     currentElement.classList.remove("emojis__item--current");
                     newCurrentElement = currentElement.parentElement.nextElementSibling.nextElementSibling.firstElementChild as HTMLElement;
                 }
+            } else if (event.key === "ArrowDown") {
+                if (!currentElement.nextElementSibling) {
+                    const nextContentElement = currentElement.parentElement.nextElementSibling?.nextElementSibling;
+                    if (nextContentElement) {
+                        newCurrentElement = nextContentElement.firstElementChild as HTMLElement;
+                        currentElement.classList.remove("emojis__item--current");
+                    }
+                } else {
+                    currentElement.classList.remove("emojis__item--current");
+                    let counter = Math.floor(currentElement.parentElement.clientWidth / (currentElement.clientWidth + 2));
+                    newCurrentElement = currentElement;
+                    while (newCurrentElement.nextElementSibling && counter > 0) {
+                        newCurrentElement = newCurrentElement.nextElementSibling as HTMLElement;
+                        counter--;
+                    }
+                }
+                event.preventDefault();
+                event.stopPropagation();
+            } else if (event.key === "ArrowUp") {
+                if (!currentElement.previousElementSibling) {
+                    const prevContentElement = currentElement.parentElement.previousElementSibling?.previousElementSibling;
+                    if (prevContentElement) {
+                        newCurrentElement = prevContentElement.lastElementChild as HTMLElement;
+                        currentElement.classList.remove("emojis__item--current");
+                    }
+                } else {
+                    currentElement.classList.remove("emojis__item--current");
+                    let counter = Math.floor(currentElement.parentElement.clientWidth / (currentElement.clientWidth + 2));
+                    newCurrentElement = currentElement;
+                    while (newCurrentElement.previousElementSibling && counter > 0) {
+                        newCurrentElement = newCurrentElement.previousElementSibling as HTMLElement;
+                        counter--;
+                    }
+                }
+                event.preventDefault();
+                event.stopPropagation();
             }
             if (newCurrentElement) {
                 newCurrentElement.classList.add("emojis__item--current");
-                const topHeight = 4;
                 const emojisContentElement = this.element.querySelector(".emojis__panel");
-                if (newCurrentElement.offsetTop - topHeight < emojisContentElement.scrollTop) {
-                    emojisContentElement.scrollTop = newCurrentElement.offsetTop - topHeight;
-                } else if (newCurrentElement.offsetTop - topHeight - emojisContentElement.clientHeight + newCurrentElement.clientHeight > emojisContentElement.scrollTop) {
-                    emojisContentElement.scrollTop = newCurrentElement.offsetTop - topHeight - emojisContentElement.clientHeight + newCurrentElement.clientHeight;
+                if (newCurrentElement.offsetTop - 8 < emojisContentElement.scrollTop) {
+                    emojisContentElement.scrollTop = newCurrentElement.offsetTop - 8;
+                } else {
+                    const topHeight = emojisContentElement.nextElementSibling.classList.contains("fn__none") ? 8 : 36;
+                    if (newCurrentElement.offsetTop + topHeight - this.element.clientHeight + newCurrentElement.clientHeight > emojisContentElement.scrollTop) {
+                        emojisContentElement.scrollTop = newCurrentElement.offsetTop + topHeight - this.element.clientHeight + newCurrentElement.clientHeight;
+                    }
                 }
             }
             event.preventDefault();
@@ -931,7 +970,10 @@ ${genHintItemHTML(item)}
         }
         const lineArray = currentLineValue.split(this.splitChar);
         const lastItem = lineArray[lineArray.length - 1];
-        if (lineArray.length > 1 && lastItem.trim() === lastItem && lastItem.length < Constants.SIZE_TITLE) {
+        if (lineArray.length > 1 &&
+            // https://github.com/siyuan-note/siyuan/issues/10637
+            lastItem.trimStart() === lastItem &&
+            lastItem.length < Constants.SIZE_TITLE) {
             // 输入法自动补全 https://github.com/siyuan-note/insider/issues/100
             if (this.splitChar === "【【" && currentLineValue.endsWith("【【】")) {
                 return "";

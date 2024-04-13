@@ -26,6 +26,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	ants "github.com/panjf2000/ants/v2"
+	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -77,7 +78,7 @@ func Widgets() (widgets []*Widget) {
 		widget.IconURL = util.BazaarOSSServer + "/package/" + repoURL + "/icon.png"
 		widget.Funding = repo.Package.Funding
 		widget.PreferredFunding = getPreferredFunding(widget.Funding)
-		widget.PreferredName = getPreferredName(widget.Package)
+		widget.PreferredName = GetPreferredName(widget.Package)
 		widget.PreferredDesc = getPreferredDesc(widget.Description)
 		widget.Updated = repo.Updated
 		widget.Stars = repo.Stars
@@ -139,7 +140,7 @@ func InstalledWidgets() (ret []*Widget) {
 		widget.PreviewURLThumb = "/widgets/" + dirName + "/preview.png"
 		widget.IconURL = "/widgets/" + dirName + "/icon.png"
 		widget.PreferredFunding = getPreferredFunding(widget.Funding)
-		widget.PreferredName = getPreferredName(widget.Package)
+		widget.PreferredName = GetPreferredName(widget.Package)
 		widget.PreferredDesc = getPreferredDesc(widget.Description)
 		info, statErr := os.Stat(filepath.Join(installPath, "README.md"))
 		if nil != statErr {
@@ -174,7 +175,7 @@ func InstallWidget(repoURL, repoHash, installPath string, systemID string) error
 }
 
 func UninstallWidget(installPath string) error {
-	if err := os.RemoveAll(installPath); nil != err {
+	if err := filelock.Remove(installPath); nil != err {
 		logging.LogErrorf("remove widget [%s] failed: %s", installPath, err)
 		return errors.New("remove community widget failed")
 	}

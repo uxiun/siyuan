@@ -6,11 +6,159 @@ import {fixTableRange, focusBlock, focusByWbr, getEditorRange} from "./selection
 import {Constants} from "../../constants";
 import {highlightRender} from "../render/highlightRender";
 import {scrollCenter} from "../../util/highlightById";
-import {updateAVName} from "../render/av/action";
-import {updateCellsValue} from "../render/av/cell";
+import {updateAttrViewCellAnimation, updateAVName} from "../render/av/action";
+import {genCellValue, genCellValueByElement, getTypeByCellElement, updateCellsValue} from "../render/av/cell";
 import {input} from "../wysiwyg/input";
+import {objEquals} from "../../util/functions";
 
-const processAV = (range: Range, html: string, protyle: IProtyle, blockElement: Element) => {
+const processAV = (range: Range, html: string, protyle: IProtyle, blockElement: HTMLElement) => {
+    const tempElement = document.createElement("template");
+    tempElement.innerHTML = html;
+    let values: IAVCellValue[][] = [];
+    if (html.endsWith("]") && html.startsWith("[")) {
+        try {
+            values = JSON.parse(html);
+        } catch (e) {
+            console.warn("insert cell: JSON.parse error");
+        }
+    } else if (tempElement.content.querySelector("table")) {
+        tempElement.content.querySelectorAll("tr").forEach(item => {
+            values.push([]);
+            Array.from(item.children).forEach(cell => {
+                values[values.length - 1].push({
+                    text: {content: cell.textContent},
+                    type: "text"
+                });
+            });
+        });
+    }
+    if (values && Array.isArray(values) && values.length > 0) {
+        const cellElements: Element[] = Array.from(blockElement.querySelectorAll(".av__cell--active, .av__cell--select")) || [];
+        if (cellElements.length === 0) {
+            blockElement.querySelectorAll(".av__row--select:not(.av__row--header)").forEach(rowElement => {
+                rowElement.querySelectorAll(".av__cell").forEach(cellElement => {
+                    cellElements.push(cellElement);
+                });
+            });
+        }
+        if (cellElements.length === 0) {
+            cellElements.push(blockElement.querySelector(".av__row:not(.av__row--header) .av__cell"));
+        }
+        const doOperations: IOperation[] = [];
+        const undoOperations: IOperation[] = [];
+
+        const avID = blockElement.dataset.avId;
+        const id = blockElement.dataset.nodeId;
+        let currentRowElement: Element;
+        const firstColIndex = cellElements[0].getAttribute("data-col-id");
+        values.find(rowItem => {
+            if (!currentRowElement) {
+                currentRowElement = cellElements[0].parentElement;
+            } else {
+                currentRowElement = currentRowElement.nextElementSibling;
+            }
+            if (!currentRowElement.classList.contains("av__row")) {
+                return true;
+            }
+            let cellElement: HTMLElement;
+            rowItem.find(cellValue => {
+                if (!cellElement) {
+                    cellElement = currentRowElement.querySelector(`.av__cell[data-col-id="${firstColIndex}"]`) as HTMLElement;
+                } else {
+                    cellElement = cellElement.nextElementSibling as HTMLElement;
+                }
+                if (!cellElement.classList.contains("av__cell")) {
+                    return true;
+                }
+                const type = getTypeByCellElement(cellElement) || cellElement.dataset.type as TAVCol;
+                if (["created", "updated", "template", "rollup"].includes(type)) {
+                    return;
+                }
+                const rowID = currentRowElement.getAttribute("data-id");
+                const cellId = cellElement.getAttribute("data-id");
+                const colId = cellElement.getAttribute("data-col-id");
+
+                const oldValue = genCellValueByElement(type, cellElement);
+                if (cellValue.type !== type) {
+                    if (type === "date") {
+                        // 类型不能转换时就不进行替换
+                        return;
+                    }
+                    const content = cellValue[cellValue.type as "text"].content;
+                    if (!content) {
+                        return;
+                    }
+                    cellValue = genCellValue(type, cellValue[cellValue.type as "text"].content.toString());
+                } else if (cellValue.type === "block") {
+                    cellValue.isDetached = true;
+                    delete cellValue.block.id;
+                }
+                cellValue.id = cellId;
+                if ((cellValue.type === "date" && typeof cellValue.date === "string") ||
+                    (cellValue.type === "relation" && typeof cellValue.relation === "string")) {
+                    return;
+                }
+                if (objEquals(cellValue, oldValue)) {
+                    return;
+                }
+                doOperations.push({
+                    action: "updateAttrViewCell",
+                    id: cellId,
+                    avID,
+                    keyID: colId,
+                    rowID,
+                    data: cellValue
+                });
+                undoOperations.push({
+                    action: "updateAttrViewCell",
+                    id: cellId,
+                    avID,
+                    keyID: colId,
+                    rowID,
+                    data: oldValue
+                });
+                updateAttrViewCellAnimation(cellElement, cellValue);
+            });
+        });
+        if (doOperations.length > 0) {
+            doOperations.push({
+                action: "doUpdateUpdated",
+                id,
+                data: dayjs().format("YYYYMMDDHHmmss"),
+            });
+            undoOperations.push({
+                action: "doUpdateUpdated",
+                id,
+                data: blockElement.getAttribute("updated"),
+            });
+            transaction(protyle, doOperations, undoOperations);
+        }
+        return;
+    }
+    const contenteditableElement = getContenteditableElement(tempElement.content.firstElementChild);
+    if (contenteditableElement && contenteditableElement.childNodes.length === 1 && contenteditableElement.firstElementChild?.getAttribute("data-type") === "block-ref") {
+        const selectCellElement = blockElement.querySelector(".av__cell--select") as HTMLElement;
+        if (selectCellElement) {
+            const avID = blockElement.dataset.avId;
+            const sourceId = contenteditableElement.firstElementChild.getAttribute("data-id");
+            const previousID = selectCellElement.dataset.blockId;
+            transaction(protyle, [{
+                action: "replaceAttrViewBlock",
+                avID,
+                previousID,
+                nextID: sourceId,
+                isDetached: false,
+            }], [{
+                action: "replaceAttrViewBlock",
+                avID,
+                previousID: sourceId,
+                nextID: previousID,
+                isDetached: selectCellElement.dataset.detached === "true",
+            }]);
+            return;
+        }
+    }
+
     const text = protyle.lute.BlockDOM2EscapeMarkerContent(html);
     const cellsElement: HTMLElement[] = Array.from(blockElement.querySelectorAll(".av__cell--select"));
     const rowsElement = blockElement.querySelector(".av__row--select");
@@ -56,7 +204,7 @@ export const insertHTML = (html: string, protyle: IProtyle, isBlock = false,
     }
     if (blockElement.classList.contains("av")) {
         range.deleteContents();
-        processAV(range, html, protyle, blockElement);
+        processAV(range, html, protyle, blockElement as HTMLElement);
         return;
     }
     let id = blockElement.getAttribute("data-node-id");
@@ -111,10 +259,14 @@ export const insertHTML = (html: string, protyle: IProtyle, isBlock = false,
         });
     }
     const tempElement = document.createElement("template");
-    // 需要再 spin 一次 https://github.com/siyuan-note/siyuan/issues/7118
-    tempElement.innerHTML = tableInlineHTML // 在 table 中插入需要使用转换好的行内元素 https://github.com/siyuan-note/siyuan/issues/9358
-        || protyle.lute.SpinBlockDOM(html) ||
+
+    let innerHTML = tableInlineHTML || // 在 table 中插入需要使用转换好的行内元素 https://github.com/siyuan-note/siyuan/issues/9358
+        protyle.lute.SpinBlockDOM(html) || // 需要再 spin 一次 https://github.com/siyuan-note/siyuan/issues/7118
         html;   // 空格会被 Spin 不再，需要使用原文
+    // 粘贴纯文本时会进行内部转义，这里需要进行反转义 https://github.com/siyuan-note/siyuan/issues/10620
+    innerHTML = innerHTML.replace(/;;;lt;;;/g, "&lt;").replace(/;;;gt;;;/g, "&gt;");
+    tempElement.innerHTML = innerHTML;
+
     const editableElement = getContenteditableElement(blockElement);
     // 使用 lute 方法会添加 p 元素，只有一个 p 元素或者只有一个字符串或者为 <u>b</u> 时的时候只拷贝内部
     if (!isBlock) {
@@ -146,6 +298,7 @@ export const insertHTML = (html: string, protyle: IProtyle, isBlock = false,
             range.insertNode(tempElement.content.cloneNode(true));
             range.collapse(false);
             blockElement.querySelector("wbr")?.remove();
+            protyle.wysiwyg.lastHTMLs[id] = oldHTML;
             input(protyle, blockElement as HTMLElement, range);
             return;
         }

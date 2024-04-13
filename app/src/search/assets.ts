@@ -23,8 +23,7 @@ export const openSearchAsset = (element: Element, isStick: boolean) => {
         return;
     }
     const localSearch = window.siyuan.storage[Constants.LOCAL_SEARCHASSET] as ISearchAssetOption;
-    const loadingElement = element.nextElementSibling;
-    loadingElement.classList.remove("fn__none");
+    element.parentElement.querySelector(".fn__loading--top").classList.remove("fn__none");
     let enterTip = "";
     /// #if !BROWSER
     enterTip = `<kbd>Enter/Double Click</kbd> ${window.siyuan.languages.showInFolder}`;
@@ -171,8 +170,9 @@ export const openSearchAsset = (element: Element, isStick: boolean) => {
 
 let inputTimeout: number;
 export const assetInputEvent = (element: Element, localSearch?: ISearchAssetOption, page = 1) => {
+    const loadingElement = element.parentElement.querySelector(".fn__loading--top");
     if (!isPaidUser()) {
-        element.nextElementSibling.classList.add("fn__none");
+        loadingElement.classList.add("fn__none");
         element.querySelector(".search__drag")?.classList.add("fn__none");
         element.querySelector("#searchAssetPreview").classList.add("fn__none");
         element.querySelector("#searchAssetList").innerHTML = `<div class="search__empty">
@@ -180,7 +180,7 @@ export const assetInputEvent = (element: Element, localSearch?: ISearchAssetOpti
 </div>`;
         return;
     }
-    element.nextElementSibling.classList.remove("fn__none");
+    loadingElement.classList.remove("fn__none");
     clearTimeout(inputTimeout);
     inputTimeout = window.setTimeout(() => {
         if (!localSearch) {
@@ -200,7 +200,7 @@ export const assetInputEvent = (element: Element, localSearch?: ISearchAssetOpti
             method: localSearch.method,
             orderBy: localSearch.sort
         }, (response) => {
-            element.nextElementSibling.classList.add("fn__none");
+            loadingElement.classList.add("fn__none");
             const nextElement = element.querySelector('[data-type="assetNext"]');
             if (page < response.data.pageCount) {
                 nextElement.removeAttribute("disabled");
@@ -353,7 +353,7 @@ export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
     window.siyuan.menus.menu.remove();
     window.siyuan.menus.menu.element.setAttribute("data-name", "searchAssetMethod");
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.keyword,
         current: method === 0,
         click() {
@@ -362,7 +362,7 @@ export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.querySyntax,
         current: method === 1,
         click() {
@@ -371,7 +371,7 @@ export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.regex,
         current: method === 3,
         click() {
@@ -440,7 +440,7 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
     window.siyuan.menus.menu.element.setAttribute("data-name", "searchAssetMore");
     const localData = window.siyuan.storage[Constants.LOCAL_SEARCHASSET];
     const sortMenu = [{
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.sortByRankAsc,
         current: localData.sort === 1,
         click() {
@@ -448,7 +448,7 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
             cb();
         }
     }, {
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.sortByRankDesc,
         current: localData.sort === 0,
         click() {
@@ -456,7 +456,7 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
             cb();
         }
     }, {
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.modifiedASC,
         current: localData.sort === 3,
         click() {
@@ -464,7 +464,7 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
             cb();
         }
     }, {
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.modifiedDESC,
         current: localData.sort === 2,
         click() {
@@ -473,18 +473,18 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
         }
     }];
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.sort,
         type: "submenu",
         submenu: sortMenu,
     }).element);
     /// #if !MOBILE
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.layout,
         type: "submenu",
         submenu: [{
-            iconHTML: Constants.ZWSP,
+            iconHTML: "",
             label: window.siyuan.languages.topBottomLayout,
             current: localData.layout === 0,
             click() {
@@ -501,7 +501,7 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
                 setStorageVal(Constants.LOCAL_SEARCHASSET, window.siyuan.storage[Constants.LOCAL_SEARCHASSET]);
             }
         }, {
-            iconHTML: Constants.ZWSP,
+            iconHTML: "",
             label: window.siyuan.languages.leftRightLayout,
             current: localData.layout === 1,
             click() {
@@ -521,14 +521,14 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
     }).element);
     /// #endif
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: Constants.ZWSP,
+        iconHTML: "",
         label: window.siyuan.languages.rebuildIndex,
         click() {
             if (!isPaidUser()) {
                 showMessage(window.siyuan.languages["_kernel"][214]);
                 return;
             }
-            element.nextElementSibling.classList.remove("fn__none");
+            element.parentElement.querySelector(".fn__loading--top").classList.remove("fn__none");
             fetchPost("/api/asset/fullReindexAssetContent", {}, () => {
                 assetInputEvent(element, localData);
             });

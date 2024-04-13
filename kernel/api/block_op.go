@@ -19,6 +19,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"path"
+	"strings"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute"
@@ -29,6 +31,107 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func moveOutlineHeading(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	id := arg["id"].(string)
+	if util.InvalidIDPattern(id, ret) {
+		return
+	}
+
+	var parentID, previousID string
+	if nil != arg["parentID"] {
+		parentID = arg["parentID"].(string)
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
+			return
+		}
+	}
+	if nil != arg["previousID"] {
+		previousID = arg["previousID"].(string)
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
+			return
+		}
+	}
+
+	transactions := []*model.Transaction{
+		{
+			DoOperations: []*model.Operation{
+				{
+					Action:     "moveOutlineHeading",
+					ID:         id,
+					PreviousID: previousID,
+					ParentID:   parentID,
+				},
+			},
+		},
+	}
+
+	model.PerformTransactions(&transactions)
+	model.WaitForWritingFiles()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+}
+
+func appendDailyNoteBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	data := arg["data"].(string)
+	dataType := arg["dataType"].(string)
+	boxID := arg["notebook"].(string)
+	if util.InvalidIDPattern(boxID, ret) {
+		return
+	}
+	if "markdown" == dataType {
+		luteEngine := util.NewLute()
+		var err error
+		data, err = dataBlockDOM(data, luteEngine)
+		if nil != err {
+			ret.Code = -1
+			ret.Msg = "data block DOM failed: " + err.Error()
+			return
+		}
+	}
+
+	p, _, err := model.CreateDailyNote(boxID)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = "create daily note failed: " + err.Error()
+		return
+	}
+
+	parentID := strings.TrimSuffix(path.Base(p), ".sy")
+	transactions := []*model.Transaction{
+		{
+			DoOperations: []*model.Operation{
+				{
+					Action:   "appendInsert",
+					Data:     data,
+					ParentID: parentID,
+				},
+			},
+		},
+	}
+
+	model.PerformTransactions(&transactions)
+	model.WaitForWritingFiles()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+}
 
 func unfoldBlock(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -70,7 +173,7 @@ func unfoldBlock(c *gin.Context) {
 			},
 		}
 	} else {
-		data, _ := gulu.JSON.MarshalJSON(map[string]interface{}{"unfold": "1"})
+		data, _ := gulu.JSON.MarshalJSON(map[string]interface{}{"fold": ""})
 		transactions = []*model.Transaction{
 			{
 				DoOperations: []*model.Operation{
@@ -167,13 +270,13 @@ func moveBlock(c *gin.Context) {
 	var parentID, previousID string
 	if nil != arg["parentID"] {
 		parentID = arg["parentID"].(string)
-		if util.InvalidIDPattern(parentID, ret) {
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
 			return
 		}
 	}
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
-		if util.InvalidIDPattern(previousID, ret) {
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
 			return
 		}
 
@@ -309,19 +412,19 @@ func insertBlock(c *gin.Context) {
 	var parentID, previousID, nextID string
 	if nil != arg["parentID"] {
 		parentID = arg["parentID"].(string)
-		if util.InvalidIDPattern(parentID, ret) {
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
 			return
 		}
 	}
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
-		if util.InvalidIDPattern(previousID, ret) {
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
 			return
 		}
 	}
 	if nil != arg["nextID"] {
 		nextID = arg["nextID"].(string)
-		if util.InvalidIDPattern(nextID, ret) {
+		if "" != nextID && util.InvalidIDPattern(nextID, ret) {
 			return
 		}
 	}

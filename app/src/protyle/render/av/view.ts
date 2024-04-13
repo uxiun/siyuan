@@ -4,6 +4,7 @@ import {transaction} from "../../wysiwyg/transaction";
 import {openMenuPanel} from "./openMenuPanel";
 import {removeBlock} from "../../wysiwyg/remove";
 import {getEditorRange} from "../../util/selection";
+import {Constants} from "../../../constants";
 
 export const openViewMenu = (options: { protyle: IProtyle, blockElement: HTMLElement, element: HTMLElement }) => {
     const menu = new Menu("av-view");
@@ -48,12 +49,15 @@ export const openViewMenu = (options: { protyle: IProtyle, blockElement: HTMLEle
                 action: "duplicateAttrViewView",
                 avID: options.blockElement.dataset.avId,
                 previousID: options.element.dataset.id,
-                id
+                id,
+                blockID: options.blockElement.dataset.nodeId
             }], [{
                 action: "removeAttrViewView",
                 avID: options.blockElement.dataset.avId,
-                id
+                id,
+                blockID: options.blockElement.dataset.nodeId
             }]);
+            options.blockElement.setAttribute(Constants.CUSTOM_SY_AV_VIEW, id);
         }
     });
     menu.addItem({
@@ -62,12 +66,13 @@ export const openViewMenu = (options: { protyle: IProtyle, blockElement: HTMLEle
         click() {
             document.querySelector(".av__panel")?.remove();
             if (options.blockElement.querySelectorAll(".layout-tab-bar .item").length === 1) {
-                removeBlock(options.protyle, options.blockElement, getEditorRange(options.blockElement));
+                removeBlock(options.protyle, options.blockElement, getEditorRange(options.blockElement), "remove");
             } else {
                 transaction(options.protyle, [{
                     action: "removeAttrViewView",
                     avID: options.blockElement.dataset.avId,
-                    id: options.element.dataset.id
+                    id: options.element.dataset.id,
+                    blockID: options.blockElement.dataset.nodeId
                 }]);
             }
         }
@@ -83,6 +88,7 @@ export const bindViewEvent = (options: {
     protyle: IProtyle,
     data: IAV,
     menuElement: HTMLElement
+    blockElement: Element
 }) => {
     const inputElement = options.menuElement.querySelector('.b3-text-field[data-type="name"]') as HTMLInputElement;
     inputElement.addEventListener("blur", () => {
@@ -101,7 +107,50 @@ export const bindViewEvent = (options: {
             inputElement.dataset.value = inputElement.value;
         }
     });
+    inputElement.addEventListener("keydown", (event) => {
+        if (event.isComposing) {
+            return;
+        }
+        if (event.key === "Enter") {
+            event.preventDefault();
+            inputElement.blur();
+            options.menuElement.parentElement.remove();
+        }
+    });
     inputElement.select();
+    const toggleTitleElement = options.menuElement.querySelector('.b3-switch[data-type="toggle-view-title"]') as HTMLInputElement;
+    toggleTitleElement.addEventListener("change", () => {
+        const avID = options.blockElement.getAttribute("data-av-id");
+        const blockID = options.blockElement.getAttribute("data-node-id");
+        if (!toggleTitleElement.checked) {
+            // hide
+            transaction(options.protyle, [{
+                action: "hideAttrViewName",
+                avID,
+                blockID,
+                data: true
+            }], [{
+                action: "hideAttrViewName",
+                avID,
+                blockID,
+                data: false
+            }]);
+            options.blockElement.querySelector(".av__title").classList.add("av__title--hide");
+        } else {
+            transaction(options.protyle, [{
+                action: "hideAttrViewName",
+                avID,
+                blockID,
+                data: false
+            }], [{
+                action: "hideAttrViewName",
+                avID,
+                blockID,
+                data: true
+            }]);
+            options.blockElement.querySelector(".av__title").classList.remove("av__title--hide");
+        }
+    });
 };
 
 export const getViewHTML = (data: IAVTable) => {
@@ -139,6 +188,12 @@ export const getViewHTML = (data: IAVTable) => {
     <span class="b3-menu__accelerator">${data.pageSize}</span>
     <svg class="b3-menu__icon b3-menu__icon--small"><use xlink:href="#iconRight"></use></svg>
 </button>
+<label class="b3-menu__item">
+    <svg class="b3-menu__icon"></svg>
+    <span class="fn__flex-center">${window.siyuan.languages.showTitle}</span>
+    <span class="fn__space fn__flex-1"></span>
+    <input data-type="toggle-view-title" type="checkbox" class="b3-switch b3-switch--menu" ${data.hideAttrViewName ? "" : "checked"}>
+</label>
 <button class="b3-menu__separator"></button>
 <button class="b3-menu__item" data-type="duplicate-view">
     <svg class="b3-menu__icon">
@@ -156,13 +211,11 @@ export const getViewHTML = (data: IAVTable) => {
 export const getSwitcherHTML = (views: IAVView[], viewId: string) => {
     let html = "";
     views.forEach((item) => {
-        html += `<button draggable="true" class="b3-menu__item" data-id="${item.id}">
+        html += `<button draggable="true" class="b3-menu__item${item.id === viewId ? " b3-menu__item--current" : ""}" data-id="${item.id}">
     <svg class="b3-menu__icon fn__grab"><use xlink:href="#iconDrag"></use></svg>
-    <div class="fn__flex-1">
-        <span class="b3-chip${item.id === viewId ? " b3-chip--primary" : ""}">
-            ${item.icon ? unicode2Emoji(item.icon, "icon", true) : '<svg class="icon"><use xlink:href="#iconTable"></use></svg>'}
-            <span class="fn__ellipsis">${item.name}</span>
-        </span>
+    <div class="b3-menu__label fn__flex" data-type="av-view-switch">
+        ${item.icon ? unicode2Emoji(item.icon, "b3-menu__icon", true) : '<svg class="b3-menu__icon"><use xlink:href="#iconTable"></use></svg>'}
+        ${item.name}
     </div>
     <svg class="b3-menu__action" data-type="av-view-edit"><use xlink:href="#iconEdit"></use></svg>
 </button>`;
@@ -183,10 +236,13 @@ export const addView = (protyle: IProtyle, blockElement: Element) => {
     transaction(protyle, [{
         action: "addAttrViewView",
         avID,
-        id
+        id,
+        blockID: blockElement.getAttribute("data-node-id")
     }], [{
         action: "removeAttrViewView",
         avID,
-        id
+        id,
+        blockID: blockElement.getAttribute("data-node-id")
     }]);
+    blockElement.setAttribute(Constants.CUSTOM_SY_AV_VIEW, id);
 };

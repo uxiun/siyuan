@@ -46,7 +46,7 @@ const renderProvider = (provider: number) => {
         return `<div class="b3-label b3-label--inner">
     ${window.siyuan.languages.syncThirdPartyProviderS3Intro}
     <div class="fn__hr"></div>
-    <em>${window.siyuan.languages.featureBetaStage}</em>
+    <em>${window.siyuan.languages.proFeature}</em>
     <div class="fn__hr"></div>
     ${window.siyuan.languages.syncThirdPartyProviderTip}
 </div>
@@ -119,6 +119,8 @@ const renderProvider = (provider: number) => {
     ${window.siyuan.languages.syncThirdPartyProviderWebDAVIntro}
     <div class="fn__hr"></div>
     <em>${window.siyuan.languages.featureBetaStage}</em>
+    <div class="fn__hr"></div>
+    <em>${window.siyuan.languages.proFeature}</em>
     <div class="fn__hr"></div>
     ${window.siyuan.languages.syncThirdPartyProviderTip}
 </div>
@@ -381,8 +383,11 @@ export const repos = {
 </div>
 <div class="b3-label">
     <div class="fn__flex config__item">
-        <div class="fn__flex-center">${window.siyuan.languages.cloudSyncDir}</div>
-        <div class="fn__flex-1"></div>
+        <div class="fn__flex-1">
+            ${window.siyuan.languages.cloudSyncDir}
+            <div class="b3-label__text">${window.siyuan.languages.cloudSyncDirTip}</div>
+        </div>
+        <div class="fn__space"></div>
         <button class="b3-button b3-button--outline fn__flex-center fn__size200" data-action="config">
             <svg><use xlink:href="#iconSettings"></use></svg>${window.siyuan.languages.config}
         </button>

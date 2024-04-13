@@ -29,6 +29,27 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
+func setEditorReadOnly(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	readOnly := arg["readonly"].(bool)
+
+	oldReadOnly := model.Conf.Editor.ReadOnly
+	model.Conf.Editor.ReadOnly = readOnly
+	model.Conf.Save()
+
+	if oldReadOnly != model.Conf.Editor.ReadOnly {
+		util.BroadcastByType("protyle", "readonly", 0, "", model.Conf.Editor.ReadOnly)
+		util.BroadcastByType("main", "readonly", 0, "", model.Conf.Editor.ReadOnly)
+	}
+}
+
 func setConfSnippet(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
@@ -171,6 +192,14 @@ func setAI(c *gin.Context) {
 
 	if 0 > ai.OpenAI.APIMaxTokens {
 		ai.OpenAI.APIMaxTokens = 0
+	}
+
+	if 0 >= ai.OpenAI.APITemperature || 2 < ai.OpenAI.APITemperature {
+		ai.OpenAI.APITemperature = 1.0
+	}
+
+	if 1 > ai.OpenAI.APIMaxContexts || 64 < ai.OpenAI.APIMaxContexts {
+		ai.OpenAI.APIMaxContexts = 7
 	}
 
 	model.Conf.AI = ai
@@ -376,6 +405,9 @@ func setFiletree(c *gin.Context) {
 	fileTree.DocCreateSavePath = strings.TrimSpace(fileTree.DocCreateSavePath)
 	if "../" == fileTree.DocCreateSavePath {
 		fileTree.DocCreateSavePath = "../Untitled"
+	}
+	if "/" == fileTree.DocCreateSavePath {
+		fileTree.DocCreateSavePath = "/Untitled"
 	}
 
 	if 1 > fileTree.MaxOpenTabCount {

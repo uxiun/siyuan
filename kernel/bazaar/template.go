@@ -27,6 +27,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/panjf2000/ants/v2"
+	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -77,7 +78,7 @@ func Templates() (templates []*Template) {
 		template.IconURL = util.BazaarOSSServer + "/package/" + repoURL + "/icon.png"
 		template.Funding = repo.Package.Funding
 		template.PreferredFunding = getPreferredFunding(template.Funding)
-		template.PreferredName = getPreferredName(template.Package)
+		template.PreferredName = GetPreferredName(template.Package)
 		template.PreferredDesc = getPreferredDesc(template.Description)
 		template.Updated = repo.Updated
 		template.Stars = repo.Stars
@@ -141,7 +142,7 @@ func InstalledTemplates() (ret []*Template) {
 		template.PreviewURLThumb = "/templates/" + dirName + "/preview.png"
 		template.IconURL = "/templates/" + dirName + "/icon.png"
 		template.PreferredFunding = getPreferredFunding(template.Funding)
-		template.PreferredName = getPreferredName(template.Package)
+		template.PreferredName = GetPreferredName(template.Package)
 		template.PreferredDesc = getPreferredDesc(template.Description)
 		info, statErr := os.Stat(filepath.Join(installPath, "README.md"))
 		if nil != statErr {
@@ -176,7 +177,7 @@ func InstallTemplate(repoURL, repoHash, installPath string, systemID string) err
 }
 
 func UninstallTemplate(installPath string) error {
-	if err := os.RemoveAll(installPath); nil != err {
+	if err := filelock.Remove(installPath); nil != err {
 		logging.LogErrorf("remove template [%s] failed: %s", installPath, err)
 		return errors.New("remove community template failed")
 	}

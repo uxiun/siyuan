@@ -298,6 +298,7 @@ func isVersionUpToDate(releaseVer string) bool {
 }
 
 func skipNewVerInstallPkg() bool {
+	return true // edit_itmikno
 	if !gulu.OS.IsWindows() && !gulu.OS.IsDarwin() {
 		return true
 	}

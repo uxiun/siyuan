@@ -187,7 +187,7 @@ func NormalizeTimeout(timeout int) int {
 		return 7
 	}
 	if 300 < timeout {
-		return 300
+		return 3000 // edit_itmikno
 	}
 	return timeout
 }

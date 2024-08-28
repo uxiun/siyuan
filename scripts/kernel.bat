@@ -1,8 +1,4 @@
 @echo off
-echo 'Cleaning Builds'
-del /S /Q /F app\build 1>nul
-del /S /Q /F app\kernel 1>nul
-del /S /Q /F app\kernel-arm64 1>nul
 
 echo 'Building Kernel'
 @REM the C compiler "gcc" is necessary https://sourceforge.net/projects/mingw-w64/files/mingw-w64/
